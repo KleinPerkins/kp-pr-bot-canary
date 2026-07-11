@@ -1,21 +1,9 @@
-# Protected automation surface — changes here require @KleinPerkins (code-owner) review.
-# The review-gate ruleset enforces code-owner review; the trusted controller also
-# refuses to auto-authorize any PR that touches these paths.
-/.github/workflows/**    @KleinPerkins
-/.github/actions/**      @KleinPerkins
-/.github/scripts/**      @KleinPerkins
-/.github/CODEOWNERS      @KleinPerkins
-/.github/dependabot.yml  @KleinPerkins
-
+# Protected runnerless automation surface — owner/admin review only.
 # BEGIN KleinPerkins/dev pr-automation protected paths (managed; do not hand-edit)
-/.github/workflows/** @KleinPerkins
-/.github/actions/** @KleinPerkins
-/.github/scripts/** @KleinPerkins
+/.github/** @KleinPerkins
 /.github/CODEOWNERS @KleinPerkins
-/.github/dependabot.yml @KleinPerkins
 /.github/pr-automation.json @KleinPerkins
-/_ops/baseline/profiles/pr-automation/** @KleinPerkins
-/_ops/bin/repo-baseline.sh @KleinPerkins
-/_ops/bin/dev-new-repo.sh @KleinPerkins
-/_ops/checks/verify-operating-model.sh @KleinPerkins
+/.github/pr-verification.json @KleinPerkins
+/CODEOWNERS @KleinPerkins
+/_ops/** @KleinPerkins
 # END KleinPerkins/dev pr-automation protected paths
