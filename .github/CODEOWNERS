@@ -6,3 +6,16 @@
 /.github/scripts/**      @KleinPerkins
 /.github/CODEOWNERS      @KleinPerkins
 /.github/dependabot.yml  @KleinPerkins
+
+# BEGIN KleinPerkins/dev pr-automation protected paths (managed; do not hand-edit)
+/.github/workflows/** @KleinPerkins
+/.github/actions/** @KleinPerkins
+/.github/scripts/** @KleinPerkins
+/.github/CODEOWNERS @KleinPerkins
+/.github/dependabot.yml @KleinPerkins
+/.github/pr-automation.json @KleinPerkins
+/_ops/baseline/profiles/pr-automation/** @KleinPerkins
+/_ops/bin/repo-baseline.sh @KleinPerkins
+/_ops/bin/dev-new-repo.sh @KleinPerkins
+/_ops/checks/verify-operating-model.sh @KleinPerkins
+# END KleinPerkins/dev pr-automation protected paths

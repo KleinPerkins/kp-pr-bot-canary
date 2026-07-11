@@ -1,0 +1,54 @@
+name: phase-b-required
+
+# BEGIN KleinPerkins/dev pr-automation (managed; do not hand-edit)
+# This trigger intentionally has no paths or branches filter. A required workflow that is filtered
+# out leaves the check permanently "Expected", which is fail-closed but wedges every matching PR.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  discover:
+    name: required source / discovery
+    runs-on: ubuntu-latest
+    outputs:
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - id: discover
+        name: Assert at least one configured validation source
+        run: echo "count=1" >> "$GITHUB_OUTPUT"
+
+  validate-canary:
+    name: required source / canary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Validate canary fixture
+        run: |
+          test -f README.md
+          test ! -e FAIL-CI-CANARY
+
+  ci:
+    name: required / ci
+    if: ${{ always() }}
+    needs:
+      - discover
+      - validate-canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require literal success from every static dependency
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VALIDATE_CANARY_RESULT: ${{ needs.validate-canary.result }}
+          DISCOVERY_COUNT: ${{ needs.discover.outputs.count }}
+        run: |
+          test "$DISCOVER_RESULT" = "success"
+          test "$VALIDATE_CANARY_RESULT" = "success"
+          test "$DISCOVERY_COUNT" -gt 0
+# END KleinPerkins/dev pr-automation
