@@ -36,20 +36,16 @@ jobs:
       - name: Validate content
         run: |
           set -euo pipefail
-          # A PR can force this producer red by adding a file named FAIL-CI-CANARY at
-          # the repo root (a marker FILE, so this check never self-matches the string).
           if [ -e "FAIL-CI-CANARY" ]; then
             echo "content: FAIL-CI-CANARY marker file present -> failing this job"
             exit 1
           fi
           echo "content: no failure marker file"
 
-  # Aggregator: this is the SINGLE required status context for the branch.
-  # It fails closed unless every discovered validation target succeeded, and
-  # fails closed if zero validation targets were discovered. Required status
-  # checks accept success|skipped|neutral, so any non-success upstream must be
-  # converted into an explicit failure here.
-  ci:
+  # CANARY C/E: the aggregator job is renamed so the required context "ci" NEVER reports.
+  # The required check is therefore ABSENT, which must keep the PR unmergeable, and a
+  # same-named status posted from a non-15368 source must not satisfy the rule.
+  aggregator-renamed-canary:
     if: always()
     needs: [validate-structure, validate-content]
     runs-on: ubuntu-latest
@@ -60,17 +56,4 @@ jobs:
         run: |
           set -euo pipefail
           echo "needs context = $NEEDS_JSON"
-          count="$(printf '%s' "$NEEDS_JSON" | jq 'length')"
-          echo "discovered validation targets: $count"
-          if [ "$count" -eq 0 ]; then
-            echo "FAIL CLOSED: zero validation targets were discovered"
-            exit 1
-          fi
-          nonsuccess="$(printf '%s' "$NEEDS_JSON" \
-            | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
-          if [ -n "$nonsuccess" ]; then
-            echo "FAIL CLOSED: non-success upstream result(s):"
-            printf '  %s\n' "$nonsuccess"
-            exit 1
-          fi
-          echo "PASS: all $count validation target(s) reported success"
+          echo "NOTE: this job is intentionally NOT named 'ci' for the absent-check canary"
