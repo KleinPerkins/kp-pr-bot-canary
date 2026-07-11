@@ -1,0 +1,514 @@
+name: controller
+
+# pr-automation/v2 trusted default-branch App controller.
+# Render only through the central Phase B lifecycle. It is inert unless the
+# repository variable AUTOMERGE_ENABLED is the literal string "true".
+#
+# ─── PLACEHOLDERS ({{...}} — substitute every occurrence before install) ────────
+# phase-b-required    display name of the required-CI workflow whose
+#                               completion triggers this controller.
+#                                                          default: required
+# .github/workflows/phase-b-required.yml    that workflow's file path (preflight asserts it).
+#                                                          default: .github/workflows/required.yml
+# required / ci    exact check-run name of the SINGLE required status
+#                               check the controller demands as literal success.
+#                                                          default: required / ci
+# 15368   numeric GitHub App id that PRODUCES that check
+#                               (GitHub Actions app).      default: 15368
+# KleinPerkins       space-separated login(s) trusted to auto-merge
+#                               (each must also be repo OWNER).  default: KleinPerkins
+# main               the only allowlisted PR base branch.  default: main
+# kleinperkins-review-gate           exact live review ruleset name.
+# kleinperkins-merge-safety          exact live merge-safety ruleset name.
+# kleinperkins-review-bot[bot]                  exact App bot login allowed for idempotent approval.
+# 2fe2fc34523c3e39ebb7fc6820a4f54410b5005a1e0c1c069f550a067356535b    SHA-256 of normalized expected review ruleset.
+# e2fd0970ac81152e38f192e44a3eb15a218b6927934990e953a6fa5dd0fab697   SHA-256 of normalized expected safety ruleset.
+#
+# Repo-provisioned credentials — standard fleet identifier NAMES (intentionally NOT
+# tokenized; each repo supplies its own VALUES under these exact names — see
+# APP-CONTROLLER.md §(d)). Rename here only if your fleet standard differs.
+#   vars.AUTOMERGE_APP_ID              numeric GitHub App id
+#   secrets.AUTOMERGE_APP_PRIVATE_KEY  the App's PEM private key
+# owner/repo are auto-resolved from ${{ github.* }} context — no substitution needed.
+#
+# Every `uses:` is pinned to a full 40-char commit SHA.
+# ────────────────────────────────────────────────────────────────────────────────
+
+# Trusted, default-branch-only controller. Because it is triggered by workflow_run, GitHub
+# always runs the copy of this file on the DEFAULT branch — never a PR's version — so a PR
+# cannot alter the controller that would authorize it. It performs an entirely read-only,
+# fail-closed preflight using the read-only GITHUB_TOKEN, and only after every assertion
+# passes does it mint a narrowly-scoped App installation token to approve + enable native
+# squash auto-merge. It never checks out, imports, or runs PR code or artifacts.
+on:
+  workflow_run:
+    workflows: ["phase-b-required"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: controller-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  authorize-and-merge:
+    if: ${{ vars.AUTOMERGE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm live activation before token mint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$THIS_REPO/actions/variables/AUTOMERGE_ENABLED" --jq '.value')" = "true"
+
+      - name: Mint read-only ruleset inspection token
+        id: controls-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMERGE_APP_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+
+      - name: Read-only fail-closed preflight
+        id: preflight
+        env:
+          ACTIVE: ${{ vars.AUTOMERGE_ENABLED }}
+          CONTROL_APP_SLUG: ${{ steps.controls-token.outputs.app-slug }}
+          CONTROL_TOKEN: ${{ steps.controls-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          THIS_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          REQUIRED_CONTEXT="required / ci"
+          REQUIRED_APP_ID=15368
+          reject() { echo "PREFLIGHT REJECT: $*" >&2; exit 1; }
+          [ "$ACTIVE" = "true" ] || reject "controller activation is not literal true"
+
+          assert_controls() {
+            live_activation="$(gh api "repos/$THIS_REPO/actions/variables/AUTOMERGE_ENABLED" --jq '.value')"
+            [ "$live_activation" = "true" ] || reject "live controller activation is not true"
+            [ "$CONTROL_APP_SLUG" = "kleinperkins-review-bot" ] || reject "ruleset token App slug mismatch"
+            rulesets="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/$THIS_REPO/rulesets?per_page=100" --paginate --slurp | jq 'add')"
+            for name in "kleinperkins-review-gate" "kleinperkins-merge-safety"; do
+              count="$(echo "$rulesets" | jq --arg n "$name" '[.[] | select(.name==$n)] | length')"
+              [ "$count" = "1" ] || reject "expected exactly one live ruleset named $name"
+            done
+            review_id="$(echo "$rulesets" | jq -r '.[] | select(.name=="kleinperkins-review-gate") | .id')"
+            safety_id="$(echo "$rulesets" | jq -r '.[] | select(.name=="kleinperkins-merge-safety") | .id')"
+            review="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/$THIS_REPO/rulesets/$review_id")"
+            safety="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/$THIS_REPO/rulesets/$safety_id")"
+            observed_review="$(echo "$review" | jq -Sc '{
+              name,target,enforcement,
+              bypass_actors:(.bypass_actors|sort_by(.actor_type,.actor_id,.bypass_mode)),
+              conditions:{ref_name:{include:(.conditions.ref_name.include|sort),exclude:(.conditions.ref_name.exclude|sort)}},
+              rules:(.rules|map({
+                type,
+                parameters:(if .type=="pull_request" then {
+                  allowed_merge_methods:(.parameters.allowed_merge_methods|sort),
+                  dismiss_stale_reviews_on_push:.parameters.dismiss_stale_reviews_on_push,
+                  require_code_owner_review:.parameters.require_code_owner_review,
+                  require_last_push_approval:.parameters.require_last_push_approval,
+                  required_approving_review_count:.parameters.required_approving_review_count,
+                  required_review_thread_resolution:.parameters.required_review_thread_resolution,
+                  required_reviewers:(.parameters.required_reviewers // [])
+                } else .parameters end)
+              })|sort_by(.type))
+            }')"
+            expected_review="$(jq -Scn --arg b "main" '{
+              name:"kleinperkins-review-gate",target:"branch",enforcement:"active",
+              bypass_actors:[{actor_id:5,actor_type:"RepositoryRole",bypass_mode:"pull_request"}],
+              conditions:{ref_name:{include:["refs/heads/"+$b],exclude:[]}},
+              rules:[{type:"pull_request",parameters:{
+                allowed_merge_methods:["merge","rebase","squash"],
+                dismiss_stale_reviews_on_push:true,
+                require_code_owner_review:true,
+                require_last_push_approval:true,
+                required_approving_review_count:1,
+                required_review_thread_resolution:false,
+                required_reviewers:[]
+              }}]
+            }')"
+            [ "$observed_review" = "$expected_review" ] || reject "review-gate live semantics drifted"
+            observed_safety="$(echo "$safety" | jq -Sc '{
+              name,target,enforcement,bypass_actors,
+              conditions:{ref_name:{include:(.conditions.ref_name.include|sort),exclude:(.conditions.ref_name.exclude|sort)}},
+              rules:(.rules|map({
+                type,
+                parameters:(if .type=="pull_request" then {
+                  allowed_merge_methods:(.parameters.allowed_merge_methods|sort),
+                  dismiss_stale_reviews_on_push:.parameters.dismiss_stale_reviews_on_push,
+                  require_code_owner_review:.parameters.require_code_owner_review,
+                  require_last_push_approval:.parameters.require_last_push_approval,
+                  required_approving_review_count:.parameters.required_approving_review_count,
+                  required_review_thread_resolution:.parameters.required_review_thread_resolution,
+                  required_reviewers:(.parameters.required_reviewers // [])
+                } elif .type=="required_status_checks" then {
+                  do_not_enforce_on_create:.parameters.do_not_enforce_on_create,
+                  required_status_checks:(.parameters.required_status_checks|sort_by(.context,.integration_id)),
+                  strict_required_status_checks_policy:.parameters.strict_required_status_checks_policy
+                } else .parameters end)
+              })|sort_by(.type))
+            }')"
+            expected_safety="$(jq -Scn --arg b "main" --arg c "$REQUIRED_CONTEXT" --argjson a "$REQUIRED_APP_ID" '{
+              name:"kleinperkins-merge-safety",target:"branch",enforcement:"active",bypass_actors:[],
+              conditions:{ref_name:{include:["refs/heads/"+$b],exclude:[]}},
+              rules:([
+                {type:"pull_request",parameters:{
+                  allowed_merge_methods:["squash"],
+                  dismiss_stale_reviews_on_push:false,
+                  require_code_owner_review:false,
+                  require_last_push_approval:false,
+                  required_approving_review_count:0,
+                  required_review_thread_resolution:true,
+                  required_reviewers:[]
+                }},
+                {type:"required_status_checks",parameters:{
+                  do_not_enforce_on_create:false,
+                  required_status_checks:[{context:$c,integration_id:$a}],
+                  strict_required_status_checks_policy:true
+                }},
+                {type:"required_linear_history",parameters:null},
+                {type:"deletion",parameters:null},
+                {type:"non_fast_forward",parameters:null}
+              ]|sort_by(.type))
+            }')"
+            [ "$observed_safety" = "$expected_safety" ] || reject "merge-safety live semantics drifted"
+          }
+
+          # 1) Re-fetch the triggering run by id (never trust the event payload alone).
+          run="$(gh api "repos/$THIS_REPO/actions/runs/$RUN_ID")"
+          [ "$(echo "$run" | jq -r '.repository.full_name')" = "$THIS_REPO" ] || reject "run repo mismatch"
+          [ "$(echo "$run" | jq -r '.path')" = ".github/workflows/phase-b-required.yml" ] || reject "run workflow path unexpected"
+          [ "$(echo "$run" | jq -r '.name')" = "phase-b-required" ] || reject "run workflow name unexpected"
+          [ "$(echo "$run" | jq -r '.event')" = "pull_request" ] || reject "run event not pull_request"
+          [ "$(echo "$run" | jq -r '.status')" = "completed" ] || reject "run not completed"
+          [ "$(echo "$run" | jq -r '.conclusion')" = "success" ] || reject "run conclusion not success"
+          run_head="$(echo "$run" | jq -r '.head_sha')"
+          suite_id="$(echo "$run" | jq -r '.check_suite_id')"
+          [[ "$suite_id" =~ ^[0-9]+$ ]] || reject "run check_suite_id missing"
+
+          # 2) Exactly one associated PR.
+          pr_count="$(echo "$run" | jq '.pull_requests | length')"
+          [ "$pr_count" = "1" ] || reject "expected exactly 1 associated PR, got $pr_count"
+          pr_number="$(echo "$run" | jq -r '.pull_requests[0].number')"
+
+          # 3) Re-fetch the PR; open / non-draft / same-repo / base allowlist.
+          pr="$(gh api "repos/$THIS_REPO/pulls/$pr_number")"
+          [ "$(echo "$pr" | jq -r '.state')" = "open" ] || reject "PR not open"
+          [ "$(echo "$pr" | jq -r '.draft')" = "false" ] || reject "PR is draft"
+          [ "$(echo "$pr" | jq -r '.base.ref')" = "main" ] || reject "PR base not allowlisted"
+          [ "$(echo "$pr" | jq -r '.base.repo.full_name')" = "$THIS_REPO" ] || reject "base repo mismatch"
+          [ "$(echo "$pr" | jq -r '.head.repo.full_name')" = "$THIS_REPO" ] || reject "head repo not same-repo (fork)"
+
+          # 4) Author allowlist (login AND association).
+          author="$(echo "$pr" | jq -r '.user.login')"
+          assoc="$(echo "$pr" | jq -r '.author_association')"
+          case " KleinPerkins " in *" $author "*) : ;; *) reject "author not allowlisted: $author" ;; esac
+          [ "$assoc" = "OWNER" ] || reject "author association not allowlisted: $assoc"
+
+          # 5) Current PR head == the run's associated head.
+          pr_head="$(echo "$pr" | jq -r '.head.sha')"
+          [ "$pr_head" = "$run_head" ] || reject "PR head moved since run ($pr_head != $run_head)"
+
+          # 6) Bind the exact required context to this workflow_run's check suite.
+          checks="$(gh api "repos/$THIS_REPO/check-suites/$suite_id/check-runs?per_page=100" --paginate --slurp | jq '[.[].check_runs[]]')"
+          total="$(echo "$checks" | jq --arg n "$REQUIRED_CONTEXT" --argjson a "$REQUIRED_APP_ID" '[.[] | select(.name==$n and .app.id==$a)] | length')"
+          [ "$total" = "1" ] || reject "required check '$REQUIRED_CONTEXT' count in triggering suite is $total"
+          ok="$(echo "$checks" | jq --arg n "$REQUIRED_CONTEXT" --argjson a "$REQUIRED_APP_ID" '[.[] | select(.name==$n and .app.id==$a and .conclusion=="success")] | length')"
+          [ "$ok" = "1" ] || reject "required check '$REQUIRED_CONTEXT' not literal success"
+
+          # 7) PR mergeable (GitHub computes this asynchronously; poll briefly).
+          mergeable="null"
+          for _ in 1 2 3 4 5 6; do
+            mergeable="$(gh api "repos/$THIS_REPO/pulls/$pr_number" --jq '.mergeable')"
+            [ "$mergeable" != "null" ] && break
+            sleep 3
+          done
+          [ "$mergeable" = "true" ] || reject "PR not mergeable ($mergeable)"
+          # shellcheck disable=SC2016
+          pr_graph="$(gh api graphql \
+            -f owner="${THIS_REPO%%/*}" \
+            -f name="${THIS_REPO#*/}" \
+            -F number="$pr_number" \
+            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){mergeStateStatus reviewThreads(first:100){nodes{isResolved} pageInfo{hasNextPage}}}}}')"
+          merge_state="$(echo "$pr_graph" | jq -r '.data.repository.pullRequest.mergeStateStatus')"
+          case "$merge_state" in BLOCKED|CLEAN) : ;; *) reject "PR merge state is unsafe ($merge_state)" ;; esac
+          [ "$(echo "$pr_graph" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "false" ] ||
+            reject "PR review-thread pagination exceeds fail-closed bound"
+          [ "$(echo "$pr_graph" | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true)] | length')" = "0" ] ||
+            reject "PR has unresolved review threads"
+
+          # 8) Exhaustively paginate changed files. Verify count and inspect rename sources.
+          changed_files="$(echo "$pr" | jq -r '.changed_files')"
+          [[ "$changed_files" =~ ^[0-9]+$ ]] || reject "PR changed_files is invalid"
+          [ "$changed_files" -le 3000 ] || reject "PR exceeds GitHub changed-file inspection limit"
+          file_objects="$(gh api "repos/$THIS_REPO/pulls/$pr_number/files?per_page=100" --paginate --slurp | jq 'add')"
+          fetched_count="$(echo "$file_objects" | jq 'length')"
+          [ "$fetched_count" = "$changed_files" ] || reject "changed-file pagination truncated ($fetched_count != $changed_files)"
+          protected="$(echo "$file_objects" | jq '[
+            .[] | (.filename, (.previous_filename // empty)) |
+            select(
+              startswith(".github/workflows/")
+              or startswith(".github/actions/")
+              or startswith(".github/scripts/")
+              or .==".github/CODEOWNERS"
+              or .==".github/dependabot.yml"
+              or .==".github/pr-automation.json"
+              or startswith("_ops/baseline/profiles/pr-automation/")
+              or .=="_ops/bin/repo-baseline.sh"
+              or .=="_ops/bin/dev-new-repo.sh"
+              or .=="_ops/checks/verify-operating-model.sh"
+            )
+          ] | unique')"
+          [ "$(echo "$protected" | jq 'length')" = "0" ] || reject "PR touches protected path(s): $protected"
+
+          # 9) Exact live controls are part of authorization, not merely rollout evidence.
+          assert_controls
+
+          echo "preflight PASS: PR #$pr_number head $pr_head"
+          {
+            echo "pr_number=$pr_number"
+            echo "head_sha=$pr_head"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint narrowly-scoped App installation token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMERGE_APP_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Arm auto-merge, approve, and finalize squash merge
+        env:
+          ACTIVE: ${{ vars.AUTOMERGE_ENABLED }}
+          CONTROL_TOKEN: ${{ steps.controls-token.outputs.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
+          MINTED_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          THIS_REPO: ${{ github.repository }}
+          PR: ${{ steps.preflight.outputs.pr_number }}
+          EXPECT: ${{ steps.preflight.outputs.head_sha }}
+        run: |
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          abort() { echo "MUTATE ABORT: $*" >&2; exit 1; }
+          [ "$ACTIVE" = "true" ] || abort "controller activation is no longer literal true"
+          [ "$MINTED_APP_SLUG" = "kleinperkins-review-bot" ] || abort "minted token App identity mismatch"
+
+          assert_pr_tuple() {
+            current="$(gh api "repos/$THIS_REPO/pulls/$PR")"
+            [ "$(echo "$current" | jq -r '.state')" = "open" ] || abort "PR not open"
+            [ "$(echo "$current" | jq -r '.draft')" = "false" ] || abort "PR became draft"
+            [ "$(echo "$current" | jq -r '.base.ref')" = "main" ] || abort "PR base moved"
+            [ "$(echo "$current" | jq -r '.base.repo.full_name')" = "$THIS_REPO" ] || abort "base repo moved"
+            [ "$(echo "$current" | jq -r '.head.repo.full_name')" = "$THIS_REPO" ] || abort "head repo moved"
+            [ "$(echo "$current" | jq -r '.head.sha')" = "$EXPECT" ] || abort "head moved"
+            case " KleinPerkins " in
+              *" $(echo "$current" | jq -r '.user.login') "*) : ;;
+              *) abort "author moved outside allowlist" ;;
+            esac
+            [ "$(echo "$current" | jq -r '.author_association')" = "OWNER" ] || abort "author association moved"
+            printf '%s' "$current"
+          }
+
+          assert_controls() {
+            live_activation="$(GH_TOKEN="$READ_TOKEN" gh api "repos/$THIS_REPO/actions/variables/AUTOMERGE_ENABLED" --jq '.value')"
+            [ "$live_activation" = "true" ] || abort "live controller activation changed"
+            rulesets="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/$THIS_REPO/rulesets?per_page=100" --paginate --slurp | jq 'add')"
+            for binding in \
+              "kleinperkins-review-gate:2fe2fc34523c3e39ebb7fc6820a4f54410b5005a1e0c1c069f550a067356535b" \
+              "kleinperkins-merge-safety:e2fd0970ac81152e38f192e44a3eb15a218b6927934990e953a6fa5dd0fab697"; do
+              name="${binding%%:*}"
+              expected="${binding#*:}"
+              ids="$(echo "$rulesets" | jq --arg n "$name" '[.[] | select(.name==$n) | .id]')"
+              [ "$(echo "$ids" | jq 'length')" = "1" ] || abort "ruleset identity drifted: $name"
+              id="$(echo "$ids" | jq -r '.[0]')"
+              live="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/$THIS_REPO/rulesets/$id")"
+              normalized="$(echo "$live" | jq -Sc '{
+                name,target,enforcement,
+                bypass_actors:(.bypass_actors|sort_by(.actor_type,.actor_id,.bypass_mode)),
+                conditions:{ref_name:{
+                  include:(.conditions.ref_name.include|sort),
+                  exclude:(.conditions.ref_name.exclude|sort)
+                }},
+                rules:(.rules|map({
+                  type,
+                  parameters:(if .type=="pull_request" then {
+                    allowed_merge_methods:(.parameters.allowed_merge_methods|sort),
+                    dismiss_stale_reviews_on_push:.parameters.dismiss_stale_reviews_on_push,
+                    require_code_owner_review:.parameters.require_code_owner_review,
+                    require_last_push_approval:.parameters.require_last_push_approval,
+                    required_approving_review_count:.parameters.required_approving_review_count,
+                    required_review_thread_resolution:.parameters.required_review_thread_resolution,
+                    required_reviewers:(.parameters.required_reviewers // [])
+                  } elif .type=="required_status_checks" then {
+                    do_not_enforce_on_create:.parameters.do_not_enforce_on_create,
+                    required_status_checks:(.parameters.required_status_checks|sort_by(.context,.integration_id)),
+                    strict_required_status_checks_policy:.parameters.strict_required_status_checks_policy
+                  } else .parameters end)
+                })|sort_by(.type))
+              }')"
+              actual="$(printf '%s' "$normalized" | sha256sum | cut -d' ' -f1)"
+              [ "$actual" = "$expected" ] || abort "ruleset semantics drifted: $name"
+            done
+            [ "$ACTIVE" = "true" ] || abort "controller activation changed"
+          }
+
+          finish_if_merged() {
+            merged_pr="$(gh api "repos/$THIS_REPO/pulls/$PR")"
+            [ "$(echo "$merged_pr" | jq -r '.merged')" = "true" ] || return 1
+            [ "$(echo "$merged_pr" | jq -r '.head.sha')" = "$EXPECT" ] || abort "merged unexpected head"
+            [ "$(echo "$merged_pr" | jq -r '.base.ref')" = "main" ] || abort "merged unexpected base"
+            [ "$(echo "$merged_pr" | jq -r '.base.repo.full_name')" = "$THIS_REPO" ] || abort "merged base repo mismatch"
+            [ "$(echo "$merged_pr" | jq -r '.head.repo.full_name')" = "$THIS_REPO" ] || abort "merged head repo mismatch"
+            armed=0
+            echo "controller: PR #$PR already squash-merged (pinned $EXPECT)"
+            return 0
+          }
+
+          # h1: full tuple and exact controls immediately before any mutation.
+          assert_controls
+          current="$(assert_pr_tuple)"
+          pr_id="$(echo "$current" | jq -r '.node_id')"
+          armed=0
+
+          cleanup_auto_merge() {
+            original_rc=$?
+            trap - EXIT
+            if [ "$armed" = "1" ]; then
+              set +e
+              snapshot="$(gh api "repos/$THIS_REPO/pulls/$PR" 2>/dev/null)"
+              snapshot_rc=$?
+              echo "$snapshot" | jq -e 'has("merged") and (.merged|type=="boolean") and has("auto_merge")' >/dev/null 2>&1
+              shape_rc=$?
+              is_merged="$(echo "$snapshot" | jq -r '.merged // false' 2>/dev/null)"
+              merged_rc=$?
+              is_armed="$(echo "$snapshot" | jq -r '.auto_merge != null' 2>/dev/null)"
+              armed_rc=$?
+              if [ "$snapshot_rc" -ne 0 ] || [ "$shape_rc" -ne 0 ] ||
+                [ "$merged_rc" -ne 0 ] || [ "$armed_rc" -ne 0 ] ||
+                { [ "$is_merged" != "true" ] && [ "$is_merged" != "false" ]; } ||
+                { [ "$is_armed" != "true" ] && [ "$is_armed" != "false" ]; }; then
+                echo "MUTATE ABORT: could not prove auto-merge cleanup state" >&2
+                exit 1
+              fi
+              if [ "$is_merged" != "true" ] && [ "$is_armed" = "true" ]; then
+                # shellcheck disable=SC2016
+                gh api graphql \
+                  -f query='mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){pullRequest{number}}}' \
+                  -f id="$pr_id" >/dev/null
+                cleanup_rc=$?
+                if [ "$cleanup_rc" -ne 0 ]; then
+                  echo "MUTATE ABORT: failed to disarm auto-merge during cleanup" >&2
+                  exit 1
+                fi
+                post="$(gh api "repos/$THIS_REPO/pulls/$PR" 2>/dev/null)"
+                post_rc=$?
+                echo "$post" | jq -e 'has("merged") and (.merged|type=="boolean") and has("auto_merge")' >/dev/null 2>&1
+                post_shape_rc=$?
+                post_merged="$(echo "$post" | jq -r '.merged // false' 2>/dev/null)"
+                post_armed="$(echo "$post" | jq -r '.auto_merge != null' 2>/dev/null)"
+                if [ "$post_rc" -ne 0 ] || [ "$post_shape_rc" -ne 0 ] ||
+                  { [ "$post_merged" != "true" ] && [ "$post_armed" != "false" ]; }; then
+                  echo "MUTATE ABORT: auto-merge cleanup postcondition failed" >&2
+                  exit 1
+                fi
+                echo "controller: disarmed and verified auto-merge after incomplete mutation" >&2
+              fi
+              set -e
+            fi
+            exit "$original_rc"
+          }
+          trap cleanup_auto_merge EXIT
+
+          # 1) Arm native squash auto-merge FIRST, pinned to the exact head via expectedHeadOid.
+          #    This controller is triggered by workflow_run AFTER required CI is already green, so the
+          #    bot approval in step 2 is the LAST unmet gate; arming while the PR is still blocked on
+          #    that approval is accepted by GitHub. If a prior bot approval already made the PR
+          #    mergeable (e.g. a re-run), enablePullRequestAutoMerge returns UNPROCESSABLE "clean
+          #    status" and we fall back to a direct pinned squash merge in step 4. Any other error is
+          #    fatal (fail closed).
+          set +e
+          out="$(gh api graphql \
+            -f query="mutation(\$id:ID!,\$oid:GitObjectID!){ enablePullRequestAutoMerge(input:{pullRequestId:\$id, mergeMethod:SQUASH, expectedHeadOid:\$oid}){ pullRequest{ number } } }" \
+            -f id="$pr_id" -f oid="$EXPECT" 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            armed=1
+            echo "native squash auto-merge armed for #$PR @ $EXPECT"
+          else
+            # Arm returned an error: inspect ACTUAL auto-merge state rather than trust message text.
+            am_now="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.auto_merge != null')"
+            if [ "$am_now" = "true" ]; then
+              armed=1
+              echo "auto-merge already armed (idempotent re-run/after-push): $out"
+            elif printf '%s' "$out" | grep -qi "clean status"; then
+              echo "auto-merge not armed (PR already in clean status); will direct-merge after approval"
+            else
+              abort "enablePullRequestAutoMerge failed unexpectedly: $out"
+            fi
+          fi
+
+          # 2) Approve, pinned to the exact head — only if no current bot approval already exists.
+          finish_if_merged && exit 0
+          assert_controls
+          assert_pr_tuple >/dev/null
+          reviews="$(gh api "repos/$THIS_REPO/pulls/$PR/reviews" --paginate --jq '.[]' | jq -s '.')"
+          existing="$(echo "$reviews" | jq --arg h "$EXPECT" --arg b "kleinperkins-review-bot[bot]" '[.[] | select(.state=="APPROVED" and .commit_id==$h and .user.login==$b)] | length')"
+          if [ "${existing:-0}" -ge 1 ]; then
+            echo "existing exact App approval for $EXPECT present; not re-approving"
+          else
+            created_review="$(gh api --method POST "repos/$THIS_REPO/pulls/$PR/reviews" \
+              -f event=APPROVE -f commit_id="$EXPECT" \
+              -f body="Automated review-bot approval: read-only preflight passed for $EXPECT.")"
+            [ "$(echo "$created_review" | jq -r '.user.login')" = "kleinperkins-review-bot[bot]" ] || abort "review identity mismatch"
+            [ "$(echo "$created_review" | jq -r '.commit_id')" = "$EXPECT" ] || abort "review head mismatch"
+          fi
+
+          # 3) h2: recheck full tuple and controls after approving.
+          finish_if_merged && exit 0
+          assert_controls
+          assert_pr_tuple >/dev/null
+
+          # 4) Finalize. Armed path: the fresh approval satisfies the last gate, so native auto-merge
+          #    fires; poll briefly for completion. Clean-status path: perform a direct squash merge
+          #    pinned to the exact head (?sha= fails if the head moved — same race-safety as
+          #    expectedHeadOid). These two paths are mutually exclusive (no double-merge race).
+          if [ "$armed" = "1" ]; then
+            merged="false"
+            for _ in $(seq 1 20); do
+              merged="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.merged')"
+              [ "$merged" = "true" ] && break
+              sleep 3
+            done
+            [ "$merged" = "true" ] || abort "auto-merge armed but PR #$PR did not merge in time"
+          else
+            # Direct fallback gets one final full tuple/control check.
+            assert_controls
+            assert_pr_tuple >/dev/null
+            gh api --method PUT "repos/$THIS_REPO/pulls/$PR/merge" \
+              -f merge_method=squash -f sha="$EXPECT" \
+              --jq '"direct squash merge " + .sha + " merged=" + (.merged|tostring)'
+          fi
+
+          # 5) Verify the PR is actually merged (deterministic, fully green).
+          merged="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.merged')"
+          [ "$merged" = "true" ] || abort "PR #$PR not merged after finalize"
+          armed=0
+          echo "controller: PR #$PR squash-merged (pinned $EXPECT)"

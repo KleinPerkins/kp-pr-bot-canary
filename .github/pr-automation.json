@@ -1,0 +1,55 @@
+{
+  "controller": {
+    "activation_variable": "AUTOMERGE_ENABLED",
+    "app_id": 4269364,
+    "app_id_variable": "AUTOMERGE_APP_ID",
+    "app_slug": "kleinperkins-review-bot",
+    "author_allowlist": [
+      "KleinPerkins"
+    ],
+    "bot_login": "kleinperkins-review-bot[bot]",
+    "private_key_secret": "AUTOMERGE_APP_PRIVATE_KEY",
+    "workflow_name": "controller",
+    "workflow_path": ".github/workflows/controller.yml"
+  },
+  "profile": "pr-automation",
+  "protected_paths": [
+    ".github/workflows/**",
+    ".github/actions/**",
+    ".github/scripts/**",
+    ".github/CODEOWNERS",
+    ".github/dependabot.yml",
+    ".github/pr-automation.json",
+    "_ops/baseline/profiles/pr-automation/**",
+    "_ops/bin/repo-baseline.sh",
+    "_ops/bin/dev-new-repo.sh",
+    "_ops/checks/verify-operating-model.sh"
+  ],
+  "repository": {
+    "base_branch": "main",
+    "owner_repo": "KleinPerkins/kp-pr-bot-canary"
+  },
+  "required_workflow": {
+    "context": "required / ci",
+    "integration_id": 15368,
+    "name": "phase-b-required",
+    "path": ".github/workflows/phase-b-required.yml"
+  },
+  "rulesets": {
+    "merge_safety": "kleinperkins-merge-safety",
+    "review_gate": "kleinperkins-review-gate"
+  },
+  "schema": "pr-automation/v2",
+  "settings": {
+    "allow_auto_merge": true,
+    "allow_merge_commit": false,
+    "allow_rebase_merge": false,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "delete_branch_on_merge": true
+  },
+  "template_digests": {
+    "merge_safety": "cf57158e62a27f32949aa74eebae7d00ff909a0ba2e687100c6e9d2edd9331a5",
+    "review_gate": "28f6d2d891238d70cd84315692b8506729d7b4d6d90f29b59dc51f3c38d76361"
+  }
+}
