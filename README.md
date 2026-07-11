@@ -23,3 +23,4 @@ Two rulesets guard the default branch: `kleinperkins-merge-safety` (required PR 
 (one code-owner approval, stale-approval dismissal).
 
 <!-- runnerless generation-1 ordinary canary -->
+<!-- retry after transient execution VM startup timeout -->
