@@ -21,3 +21,5 @@ Nothing here is production code. Do not depend on it. It may be deleted at any t
 Two rulesets guard the default branch: `kleinperkins-merge-safety` (required PR + required
 `required / ci` check from GitHub Actions, no bypass) and `kleinperkins-review-gate`
 (one code-owner approval, stale-approval dismissal).
+
+<!-- runnerless generation-1 ordinary canary -->
