@@ -4,7 +4,7 @@
   "owner": "KleinPerkins",
   "name": "kp-pr-bot-canary",
   "default_branch": "main",
-  "activation_generation": 1,
+  "activation_generation": 2,
   "check_name": "pr-automation / verify",
   "verifier_app_id": 4274739,
   "verifier_integration_id": 4274739,
