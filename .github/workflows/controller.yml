@@ -114,7 +114,6 @@ jobs:
           private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-contents: write
           permission-pull-requests: write
 
       - name: Approve head and enable native squash auto-merge
