@@ -16,8 +16,8 @@
     "_ops"
   ],
   "ruleset_fingerprints": [
-    "sha256:2cf8b925abf60ef9e22b8f8db2ef528ed36fb0252620ad28f7cd197d675407fb",
-    "sha256:2fe2fc34523c3e39ebb7fc6820a4f54410b5005a1e0c1c069f550a067356535b"
+    "sha256:903f1f66c4f3519378395d2c04cc31465fcc0188e07028cd8b3f9d8ad1f1e28f",
+    "sha256:959ee027bbabd0f294b12373fe9865c82440a6cd38e7bd2a7fc7d0bea4f1958e"
   ],
   "max_changed_files": 200,
   "max_total_patch_bytes": 5000000,
