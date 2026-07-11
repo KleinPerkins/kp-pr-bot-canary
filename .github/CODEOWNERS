@@ -1,0 +1,8 @@
+# Protected automation surface — changes here require @KleinPerkins (code-owner) review.
+# The review-gate ruleset enforces code-owner review; the trusted controller also
+# refuses to auto-authorize any PR that touches these paths.
+/.github/workflows/**    @KleinPerkins
+/.github/actions/**      @KleinPerkins
+/.github/scripts/**      @KleinPerkins
+/.github/CODEOWNERS      @KleinPerkins
+/.github/dependabot.yml  @KleinPerkins
