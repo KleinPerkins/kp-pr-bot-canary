@@ -27,6 +27,9 @@ jobs:
           echo "structure: README.md present"
 
   validate-content:
+    # CANARY D: this workflow only triggers on pull_request, so this condition is always
+    # false at runtime -> the job is SKIPPED, and the aggregator must fail closed on it.
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR head
@@ -36,8 +39,6 @@ jobs:
       - name: Validate content
         run: |
           set -euo pipefail
-          # A PR can force this producer red by adding a file named FAIL-CI-CANARY at
-          # the repo root (a marker FILE, so this check never self-matches the string).
           if [ -e "FAIL-CI-CANARY" ]; then
             echo "content: FAIL-CI-CANARY marker file present -> failing this job"
             exit 1
@@ -45,10 +46,6 @@ jobs:
           echo "content: no failure marker file"
 
   # Aggregator: this is the SINGLE required status context for the branch.
-  # It fails closed unless every discovered validation target succeeded, and
-  # fails closed if zero validation targets were discovered. Required status
-  # checks accept success|skipped|neutral, so any non-success upstream must be
-  # converted into an explicit failure here.
   ci:
     if: always()
     needs: [validate-structure, validate-content]
