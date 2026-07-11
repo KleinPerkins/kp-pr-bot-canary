@@ -127,6 +127,9 @@ jobs:
           set -euo pipefail
           abort() { echo "MUTATE ABORT: $*" >&2; exit 1; }
 
+          # [CANARY-TEMP] widen the preflight->h1 window so the head-move race is deterministic;
+          # removed immediately after the canary. Does NOT change h1/h2 logic itself.
+          sleep 35
           # Re-fetch the head immediately before ANY mutation; abort if it moved.
           h1="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.head.sha')"
           [ "$h1" = "$EXPECT" ] || abort "head moved before mutation ($h1)"
