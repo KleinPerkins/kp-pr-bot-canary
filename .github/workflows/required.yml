@@ -36,12 +36,13 @@ jobs:
       - name: Validate content
         run: |
           set -euo pipefail
-          # A PR can force this producer red by introducing this marker anywhere.
-          if grep -RIl --exclude-dir=.git "FAIL_CI_CANARY" . >/dev/null 2>&1; then
-            echo "content: FAIL_CI_CANARY marker present -> failing this job"
+          # A PR can force this producer red by adding a file named FAIL-CI-CANARY at
+          # the repo root (a marker FILE, so this check never self-matches the string).
+          if [ -e "FAIL-CI-CANARY" ]; then
+            echo "content: FAIL-CI-CANARY marker file present -> failing this job"
             exit 1
           fi
-          echo "content: no failure marker"
+          echo "content: no failure marker file"
 
   # Aggregator: this is the SINGLE required status context for the branch.
   # It fails closed unless every discovered validation target succeeded, and
