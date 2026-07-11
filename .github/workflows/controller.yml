@@ -149,10 +149,17 @@ jobs:
           if [ "$rc" -eq 0 ]; then
             armed=1
             echo "native squash auto-merge armed for #$PR @ $EXPECT"
-          elif printf '%s' "$out" | grep -q "clean status"; then
-            echo "auto-merge not armed (PR already in clean status); will direct-merge after approval"
           else
-            abort "enablePullRequestAutoMerge failed unexpectedly: $out"
+            # Arm returned an error: inspect ACTUAL auto-merge state rather than trust message text.
+            am_now="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.auto_merge != null')"
+            if [ "$am_now" = "true" ]; then
+              armed=1
+              echo "auto-merge already armed (idempotent re-run/after-push): $out"
+            elif printf '%s' "$out" | grep -qi "clean status"; then
+              echo "auto-merge not armed (PR already in clean status); will direct-merge after approval"
+            else
+              abort "enablePullRequestAutoMerge failed unexpectedly: $out"
+            fi
           fi
 
           # 2) Approve, pinned to the exact head — only if no current bot approval already exists.
