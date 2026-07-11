@@ -6,3 +6,4 @@
 /.github/scripts/**      @KleinPerkins
 /.github/CODEOWNERS      @KleinPerkins
 /.github/dependabot.yml  @KleinPerkins
+# canary 2: protected-path touch — the controller must REFUSE to authorize this PR
