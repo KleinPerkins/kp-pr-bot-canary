@@ -10,12 +10,16 @@
   "verifier_integration_id": 4274739,
   "reviewer_app_id": 4269364,
   "reviewer_integration_id": 4269364,
-  "protected_paths": [".github", "CODEOWNERS", "_ops"],
+  "protected_paths": [
+    ".github",
+    "CODEOWNERS",
+    "_ops"
+  ],
   "ruleset_fingerprints": [
     "sha256:2cf8b925abf60ef9e22b8f8db2ef528ed36fb0252620ad28f7cd197d675407fb",
     "sha256:2fe2fc34523c3e39ebb7fc6820a4f54410b5005a1e0c1c069f550a067356535b"
   ],
   "max_changed_files": 200,
   "max_total_patch_bytes": 5000000,
-  "controller_release_digest": "sha256:73aa898f1957b028637ea5d1e42270b48a17c770a99b5d5f2b56c2178d1eeebb"
+  "controller_release_digest": "sha256:b7f6a9bfbc508ba43d592924cbe6b744e779405b8c0a46de3c844f0d1edb0f66"
 }
