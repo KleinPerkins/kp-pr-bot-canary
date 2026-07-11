@@ -117,7 +117,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Approve head and enable native squash auto-merge
+      - name: Arm auto-merge, approve, and finalize squash merge
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           THIS_REPO: ${{ github.repository }}
@@ -129,9 +129,33 @@ jobs:
 
           # Re-fetch the head immediately before ANY mutation; abort if it moved.
           h1="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.head.sha')"
-          [ "$h1" = "$EXPECT" ] || abort "head moved before approval ($h1)"
+          [ "$h1" = "$EXPECT" ] || abort "head moved before mutation ($h1)"
+          pr_id="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.node_id')"
 
-          # Approve, pinned to the exact head — only if no current bot approval already exists.
+          # 1) Arm native squash auto-merge FIRST, pinned to the exact head via expectedHeadOid.
+          #    This controller is triggered by workflow_run AFTER required CI is already green, so the
+          #    bot approval in step 2 is the LAST unmet gate; arming while the PR is still blocked on
+          #    that approval is accepted by GitHub. If a prior bot approval already made the PR
+          #    mergeable (e.g. a re-run), enablePullRequestAutoMerge returns UNPROCESSABLE "clean
+          #    status" and we fall back to a direct pinned squash merge in step 4. Any other error is
+          #    fatal (fail closed).
+          armed=0
+          set +e
+          out="$(gh api graphql \
+            -f query='mutation($id:ID!,$oid:GitObjectID!){ enablePullRequestAutoMerge(input:{pullRequestId:$id, mergeMethod:SQUASH, expectedHeadOid:$oid}){ pullRequest{ number } } }' \
+            -f id="$pr_id" -f oid="$EXPECT" 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            armed=1
+            echo "native squash auto-merge armed for #$PR @ $EXPECT"
+          elif printf '%s' "$out" | grep -q "clean status"; then
+            echo "auto-merge not armed (PR already in clean status); will direct-merge after approval"
+          else
+            abort "enablePullRequestAutoMerge failed unexpectedly: $out"
+          fi
+
+          # 2) Approve, pinned to the exact head — only if no current bot approval already exists.
           reviews="$(gh api "repos/$THIS_REPO/pulls/$PR/reviews" --paginate --jq '.[]' | jq -s '.')"
           existing="$(echo "$reviews" | jq --arg h "$EXPECT" '[.[] | select(.state=="APPROVED" and .commit_id==$h and .user.type=="Bot")] | length')"
           if [ "${existing:-0}" -ge 1 ]; then
@@ -143,19 +167,29 @@ jobs:
               --jq '"approved " + .commit_id'
           fi
 
-          # Re-fetch head; stop if it moved after approving.
+          # 3) Re-fetch head; stop if it moved after approving.
           h2="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.head.sha')"
-          [ "$h2" = "$EXPECT" ] || abort "head moved after approval ($h2); not enabling auto-merge"
+          [ "$h2" = "$EXPECT" ] || abort "head moved after approval ($h2); not finalizing"
 
-          # Enable native squash auto-merge, pinned to the exact head.
-          pr_id="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.node_id')"
-          # shellcheck disable=SC2016  # $id/$oid are GraphQL variables, must NOT be shell-expanded.
-          gh api graphql \
-            -f query='mutation($id:ID!,$oid:GitObjectID!){ enablePullRequestAutoMerge(input:{pullRequestId:$id, mergeMethod:SQUASH, expectedHeadOid:$oid}){ pullRequest{ number autoMergeRequest{ enabledAt mergeMethod } } } }' \
-            -f id="$pr_id" -f oid="$EXPECT" \
-            --jq '.data.enablePullRequestAutoMerge.pullRequest | "auto-merge enabled #\(.number) via \(.autoMergeRequest.mergeMethod)"'
+          # 4) Finalize. Armed path: the fresh approval satisfies the last gate, so native auto-merge
+          #    fires; poll briefly for completion. Clean-status path: perform a direct squash merge
+          #    pinned to the exact head (?sha= fails if the head moved — same race-safety as
+          #    expectedHeadOid). These two paths are mutually exclusive (no double-merge race).
+          if [ "$armed" = "1" ]; then
+            merged="false"
+            for _ in $(seq 1 20); do
+              merged="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.merged')"
+              [ "$merged" = "true" ] && break
+              sleep 3
+            done
+            [ "$merged" = "true" ] || abort "auto-merge armed but PR #$PR did not merge in time"
+          else
+            gh api --method PUT "repos/$THIS_REPO/pulls/$PR/merge" \
+              -f merge_method=squash -f sha="$EXPECT" \
+              --jq '"direct squash merge " + .sha + " merged=" + (.merged|tostring)'
+          fi
 
-          # Verify.
-          am="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.auto_merge != null')"
-          [ "$am" = "true" ] || abort "auto-merge not enabled after mutation"
-          echo "controller: squash auto-merge enabled for PR #$PR pinned to $EXPECT"
+          # 5) Verify the PR is actually merged (deterministic, fully green).
+          merged="$(gh api "repos/$THIS_REPO/pulls/$PR" --jq '.merged')"
+          [ "$merged" = "true" ] || abort "PR #$PR not merged after finalize"
+          echo "controller: PR #$PR squash-merged (pinned $EXPECT)"
