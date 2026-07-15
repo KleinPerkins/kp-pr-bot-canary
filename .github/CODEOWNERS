@@ -7,3 +7,9 @@
 /CODEOWNERS @KleinPerkins
 /_ops/** @KleinPerkins
 # END KleinPerkins/dev pr-automation protected paths
+
+# BEGIN kleinperkins runnerless PR automation v3
+/.github/ @KleinPerkins
+/CODEOWNERS @KleinPerkins
+/_ops/ @KleinPerkins
+# END kleinperkins runnerless PR automation v3
