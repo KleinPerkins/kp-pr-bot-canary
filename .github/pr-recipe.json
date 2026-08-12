@@ -5,13 +5,34 @@
       "id": "canned.repository-contract.v1"
     }
   ],
-  "custom_jobs": [],
+  "custom_jobs": [
+    {
+      "argv": [
+        "run-literal",
+        "python3",
+        "-B",
+        "-c",
+        "from pathlib import Path; assert Path('canaries/m5-s1-node.txt').read_text(encoding='utf-8') == 'PASS\\n'"
+      ],
+      "depends_on": [
+        "canned.repository-contract.v1"
+      ],
+      "environment": {},
+      "id": "repo.kp-pr-bot-canary.m5-s1-node"
+    }
+  ],
   "pipeline": {
     "aggregate": "all_required",
     "jobs": [
       {
         "depends_on": [],
         "id": "canned.repository-contract.v1"
+      },
+      {
+        "depends_on": [
+          "canned.repository-contract.v1"
+        ],
+        "id": "repo.kp-pr-bot-canary.m5-s1-node"
       }
     ],
     "pipeline_id": "kp-pr-bot-canary-m3-pipeline",
