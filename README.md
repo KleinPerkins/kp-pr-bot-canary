@@ -24,3 +24,5 @@ GitHub Actions remain paused and no workflow content belongs in this repository.
 <!-- runnerless generation-2 smoke -->
 
 <!-- G4 informational proof: the repository-owned safety Check rejected an executable fixture and permits this restored inert head. -->
+
+<!-- G4 R6 requiredness proof: the named canary safety Check blocked the deliberate executable fixture and permits this restored inert head. -->
