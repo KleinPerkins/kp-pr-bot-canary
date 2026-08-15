@@ -22,3 +22,5 @@ GitHub Actions remain paused and no workflow content belongs in this repository.
 <!-- runnerless generation-1 ordinary canary -->
 
 <!-- runnerless generation-2 smoke -->
+
+<!-- G4 informational proof: the repository-owned safety Check rejected an executable fixture and permits this restored inert head. -->
