@@ -59,6 +59,12 @@ def test_policy_identity() -> None:
 
 def test_recipe_topology() -> None:
     recipe = load_json(RECIPE_PATH)
+    assert recipe.get("canned_refs") == [
+        {
+            "digest": "sha256:43d4d6238bad4513a58135cc28b0810aff03921053f3d0a282261c756e8d5189",
+            "id": CANNED_ID,
+        }
+    ], "recipe must bind the exact canned repository contract"
     expected_job = {
         "argv": ["run-literal", "python3", "-B", "tests/test_canary_contract.py"],
         "depends_on": [CANNED_ID],
