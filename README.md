@@ -2,25 +2,22 @@
 
 **Disposable canary — safe to delete.**
 
-This repository is a throwaway test bed for validating the repo-local GitHub Actions
-**PR review-bot** model (a "chaos-scheduler-style but hardened" design). It exists only to
-exercise the branch-protection rulesets, the unprivileged CI producer, and the trusted
-default-branch controller against real GitHub platform behavior.
+This repository is a throwaway test bed for validating the runnerless PR automation model. It
+exists only to exercise branch-protection rulesets, exact-head verification, and reviewer-driven
+native auto-merge against real GitHub platform behavior.
 
 Nothing here is production code. Do not depend on it. It may be deleted at any time.
 
 ## Design under test
 
-- `.github/workflows/required.yml` — unprivileged CI producer (no secrets, `contents: read`),
-  ending in an aggregator job `ci` that fails closed.
-- `.github/workflows/controller.yml` — trusted default-branch controller
-  (`workflow_run`), read-only preflight, mints a narrowly-scoped App token only after every
-  safety assertion passes.
-- `.github/CODEOWNERS` — protects the automation surface.
+- verifier App `4274739` posts the aggregate and repository job Checks after isolated,
+  credential-free execution;
+- reviewer App `4269364` approves the exact passing head and arms native squash auto-merge;
+- `.github/pr-automation.json`, `.github/pr-recipe.json`, and the generated lock define the
+  protected repository contract; and
+- `.github/CODEOWNERS` keeps that automation surface owner-controlled.
 
-Two rulesets guard the default branch: `kleinperkins-merge-safety` (required PR + required
-`required / ci` check from GitHub Actions, no bypass) and `kleinperkins-review-gate`
-(one code-owner approval, stale-approval dismissal).
+GitHub Actions remain paused and no workflow content belongs in this repository.
 
 <!-- runnerless generation-1 ordinary canary -->
 

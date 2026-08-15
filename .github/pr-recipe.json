@@ -11,14 +11,13 @@
         "run-literal",
         "python3",
         "-B",
-        "-c",
-        "from pathlib import Path; assert Path('canaries/m5-s1-node.txt').read_text(encoding='utf-8') == 'PASS\\n'"
+        "tests/test_canary_contract.py"
       ],
       "depends_on": [
         "canned.repository-contract.v1"
       ],
       "environment": {},
-      "id": "repo.kp-pr-bot-canary.m5-s1-node"
+      "id": "repo.kp-pr-bot-canary.m3-verify"
     }
   ],
   "pipeline": {
@@ -32,7 +31,7 @@
         "depends_on": [
           "canned.repository-contract.v1"
         ],
-        "id": "repo.kp-pr-bot-canary.m5-s1-node"
+        "id": "repo.kp-pr-bot-canary.m3-verify"
       }
     ],
     "pipeline_id": "kp-pr-bot-canary-m3-pipeline",
