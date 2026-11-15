@@ -31,6 +31,9 @@ MARKER = '<!-- g1-review-receipt:v1 -->\n'
 ORIGIN_MARKER = '<!-- g1-pr-origin:v1 -->\n'
 MAX_RECEIPT = 60000
 MAX_DIFF = 5000000
+MERGE_SETTINGS_QUERY = ('query CanaryMergeSettings { repository(owner:"KleinPerkins",'
+    'name:"kp-pr-bot-canary") { databaseId nameWithOwner mergeCommitAllowed '
+    'rebaseMergeAllowed squashMergeAllowed autoMergeAllowed } }')
 ROOT = Path(__file__).resolve().parents[1]
 
 class Rejected(RuntimeError):
@@ -56,7 +59,9 @@ class API:
         require(bool(token), 'missing API credential')
         self.token, self.writable = token, writable
     def request(self, path, method='GET', data=None):
-        require(method == 'GET' or self.writable, 'read-only API cannot mutate')
+        # A fixed, argument-free GraphQL query is read-only despite HTTP POST.
+        fixed_read = path == '/graphql' and method == 'POST' and data == {'query': MERGE_SETTINGS_QUERY}
+        require(method == 'GET' or self.writable or fixed_read, 'read-only API cannot mutate')
         require(path.startswith('/') and not path.startswith('//'), 'invalid API path')
         headers = {'Authorization': 'Bearer ' + self.token, 'Accept': 'application/vnd.github+json',
                    'X-GitHub-Api-Version': '2022-11-28'}
@@ -101,6 +106,26 @@ class API:
             if len(batch) < 100:
                 return rows
         raise Rejected('pagination bound exhausted')
+
+def repository_snapshot(api):
+    repo = api.request('/repos/' + REPOSITORY)
+    result = api.request('/graphql', 'POST', {'query': MERGE_SETTINGS_QUERY})
+    require(isinstance(result, dict) and not result.get('errors'), 'merge settings query failed')
+    data = result.get('data')
+    require(isinstance(data, dict) and isinstance(data.get('repository'), dict), 'merge settings unavailable')
+    settings = data['repository']
+    require(settings.get('databaseId') == REPOSITORY_ID and settings.get('nameWithOwner') == REPOSITORY,
+            'merge settings repository mismatch')
+    fields = {'allow_squash_merge': 'squashMergeAllowed', 'allow_merge_commit': 'mergeCommitAllowed',
+              'allow_rebase_merge': 'rebaseMergeAllowed', 'allow_auto_merge': 'autoMergeAllowed'}
+    # GitHub omits these REST fields for read-only credentials. GraphQL exposes
+    # the same current repository settings without broader credential permissions.
+    for rest, graphql in fields.items():
+        value = settings.get(graphql)
+        require(type(value) is bool, 'missing/invalid merge setting')
+        require(rest not in repo or repo[rest] is value, 'merge settings changed between reads')
+        repo[rest] = value
+    return repo
 
 def validate_controls(repo, rules, rulesets, *, require_legacy=False):
     require(repo['id'] == REPOSITORY_ID and repo['full_name'] == REPOSITORY, 'repository mismatch')
@@ -370,7 +395,7 @@ def validate_ci_jobs(api, prefix, pr, merge_sha, run):
 
 def snapshot(api, number, policy, policy_hash, now):
     prefix = '/repos/' + REPOSITORY
-    repo = api.request(prefix)
+    repo = repository_snapshot(api)
     pr = api.request(prefix + '/pulls/' + str(number))
     require(pr['state'] == 'open' and not pr['draft'] and not pr.get('merged'), 'PR is not open ready')
     require(pr['user']['id'] == OWNER_ID and pr['user']['type'] == 'User', 'author policy')
@@ -398,7 +423,7 @@ def snapshot(api, number, policy, policy_hash, now):
 
 def controls_snapshot(api, *, require_legacy=False):
     prefix = '/repos/' + REPOSITORY
-    repo = api.request(prefix)
+    repo = repository_snapshot(api)
     rules = api.request(prefix + '/rules/branches/main')
     summaries = api.pages(prefix + '/rulesets?includes_parents=true')
     rulesets = [api.request(prefix + '/rulesets/' + str(s['id'])) for s in summaries]

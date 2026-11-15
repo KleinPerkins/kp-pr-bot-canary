@@ -148,6 +148,51 @@ class APIAndControlsTests(unittest.TestCase):
         self.assertEqual(request.data,b'{"query":"fixture"}')
     def test_readonly_rejects_post_without_network(self):
         with self.assertRaises(gate.Rejected):gate.API('fake').request('/graphql','POST',{})
+    def test_readonly_allows_only_fixed_merge_query(self):
+        from unittest.mock import Mock
+        response=Mock();response.read.return_value=b'{}'
+        response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
+        api=gate.API('fixture')
+        with patch.object(gate.urllib.request,'urlopen',return_value=response) as opened:
+            api.request('/graphql','POST',{'query':gate.MERGE_SETTINGS_QUERY})
+            self.assertEqual(opened.call_count,1)
+            for path,method,data in [('/graphql','POST',{'query':'mutation { unsafe }'}),
+                ('/graphql','POST',{'query':gate.MERGE_SETTINGS_QUERY,'variables':{}}),
+                ('/repos/other','POST',{'query':gate.MERGE_SETTINGS_QUERY}),
+                ('/graphql','PATCH',{'query':gate.MERGE_SETTINGS_QUERY})]:
+                with self.assertRaises(gate.Rejected):api.request(path,method,data)
+            self.assertEqual(opened.call_count,1)
+    def merge_response(self):
+        return {'data':{'repository':{'databaseId':gate.REPOSITORY_ID,'nameWithOwner':gate.REPOSITORY,
+            'mergeCommitAllowed':False,'rebaseMergeAllowed':False,'squashMergeAllowed':True,'autoMergeAllowed':True}}}
+    def test_readonly_redacted_rest_merge_settings_are_validated(self):
+        repo,rules,sets=self.controls()
+        redacted={k:v for k,v in repo.items() if not k.startswith('allow_')}
+        api=gate.API('fixture')
+        with patch.object(api,'request',side_effect=[redacted,self.merge_response()]) as request:
+            observed=gate.repository_snapshot(api)
+        self.assertEqual(observed,repo)
+        request.assert_any_call('/graphql','POST',{'query':gate.MERGE_SETTINGS_QUERY})
+        gate.validate_controls(observed,rules,sets)
+    def test_merge_query_missing_errors_identity_type_drift_and_disagreement_fail(self):
+        good=self.merge_response()
+        responses=[{}, {'data':None}, {'data':{'repository':None}}, dict(good,errors=[{'message':'denied'}])]
+        for field,value in [('databaseId',1),('nameWithOwner','other/repo'),('autoMergeAllowed',None),
+                            ('mergeCommitAllowed',0),('squashMergeAllowed','true')]:
+            bad=copy.deepcopy(good);bad['data']['repository'][field]=value;responses.append(bad)
+        for result in responses:
+            with patch.object(gate.API,'request',side_effect=[{},result]):
+                with self.assertRaises(gate.Rejected):gate.repository_snapshot(gate.API('fixture'))
+        with patch.object(gate.API,'request',side_effect=[{'allow_auto_merge':False},good]):
+            with self.assertRaisesRegex(gate.Rejected,'between reads'):gate.repository_snapshot(gate.API('fixture'))
+    def test_graphql_merge_setting_still_must_meet_controls(self):
+        repo,rules,sets=self.controls()
+        redacted={k:v for k,v in repo.items() if not k.startswith('allow_')}
+        for field in ('mergeCommitAllowed','rebaseMergeAllowed','squashMergeAllowed','autoMergeAllowed'):
+            bad=self.merge_response();bad['data']['repository'][field]=not bad['data']['repository'][field]
+            with patch.object(gate.API,'request',side_effect=[dict(redacted),bad]):
+                observed=gate.repository_snapshot(gate.API('fixture'))
+            with self.assertRaisesRegex(gate.Rejected,'merge methods'):gate.validate_controls(observed,rules,sets)
     def test_pagination_reads_past_first_page(self):
         api=gate.API('fake')
         with patch.object(api,'request',side_effect=[{'jobs':list(range(100))},{'jobs':[100]}]) as request:
