@@ -138,6 +138,12 @@ def validate_controls(repo, rules, rulesets, *, require_legacy=False):
                         'owner bypass exception changed')
 
 def validate_receipt(receipt, producer, current, policy_hash, now):
+    fields = {'schema','capture_id','trust_model','tuple','reviewer_enrollment_id','reviewer_origin_account',
+              'workspace_binding','instructions_sha256','runtime','started_at','completed_at','review','report_sha256'}
+    require(isinstance(receipt, dict) and set(receipt) == fields, 'closed receipt schema mismatch')
+    require(all(isinstance(receipt[k], str) and receipt[k] for k in fields-{'tuple','runtime','review'}), 'receipt field type')
+    require(re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', receipt['capture_id']) is not None,
+            'capture identifier missing/malformed')
     require(receipt.get('schema') == 'g1-local-review/v1' and receipt.get('trust_model') == 'q16-operational-local', 'receipt schema/trust')
     require(receipt.get('reviewer_enrollment_id') == producer['id'] and producer.get('enabled') is True, 'producer not enrolled')
     require(receipt['tuple'] == dict(current, origin_account=producer['origin_account']), 'receipt tuple drift')
@@ -146,6 +152,10 @@ def validate_receipt(receipt, producer, current, policy_hash, now):
     require(receipt.get('workspace_binding') == 'owner-declared-enrollment', 'workspace binding missing')
     require(receipt.get('instructions_sha256') == producer['instructions_sha256'], 'review instruction drift')
     runtime = receipt['runtime']
+    runtime_fields = {'cli_version','credential_store','thread_id','turn_id','status','event_stream_sha256','startup_notice_sha256'}
+    require(isinstance(runtime, dict) and set(runtime) == runtime_fields, 'closed runtime schema mismatch')
+    require(runtime['turn_id'] is None and all(isinstance(runtime[k], str) and runtime[k]
+            for k in runtime_fields-{'turn_id','startup_notice_sha256'}), 'runtime field type')
     require(runtime.get('status') == 'completed' and isinstance(runtime.get('thread_id'), str)
             and len(runtime['thread_id']) >= 8 and runtime.get('cli_version') == producer['cli_version']
             and runtime.get('credential_store') == producer['credential_store'], 'review runtime incomplete')
@@ -158,6 +168,8 @@ def validate_receipt(receipt, producer, current, policy_hash, now):
     started, completed = timestamp(receipt['started_at']), timestamp(receipt['completed_at'])
     require(started <= completed <= now and now - started <= dt.timedelta(hours=24), 'stale/future review')
     review = receipt['review']
+    require(isinstance(review, dict) and set(review) == {'verdict','coverage','summary','findings','unresolved_findings'},
+            'closed review schema mismatch')
     require(review.get('verdict') == 'pass' and review.get('coverage') == 'complete'
             and review.get('findings') == [] and review.get('unresolved_findings') == []
             and isinstance(review.get('summary'), str) and review['summary'].strip(), 'review incomplete or findings')

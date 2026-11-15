@@ -232,6 +232,7 @@ def captured_report(raw,last):
   else:
    item=event.get('item') or {}
    notice=item.get('type')=='error' and item.get('message') in STARTUP_NOTICES
+   require(not notice or kind=='item.completed','startup notice lacks completed event')
    require(phase=='turn' or (notice and phase in ('startup','thread')),'review item out of order')
  starts=[e for e in events if e.get('type')=='thread.started']
  require(len(starts)==1 and isinstance(starts[0].get('thread_id'),str) and starts[0]['thread_id'],'fresh thread ID missing')

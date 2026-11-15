@@ -20,11 +20,11 @@ def fixture():
     producer = dict(id='personal-opaque', enabled=True, origin_account='origin-opaque',
                     github_user_id=gate.OWNER_ID, instructions_sha256='f'*64, cli_version='1.0', credential_store='keyring')
     review = dict(verdict='pass', coverage='complete', summary='No findings after full diff review.', findings=[], unresolved_findings=[])
-    receipt = dict(schema='g1-local-review/v1', capture_id='capture-uuid', trust_model='q16-operational-local',
+    receipt = dict(schema='g1-local-review/v1', capture_id='00000000-0000-4000-8000-000000000001', trust_model='q16-operational-local',
         tuple=dict(current, origin_account=producer['origin_account']), reviewer_enrollment_id=producer['id'],
         reviewer_origin_account=producer['origin_account'], workspace_binding='owner-declared-enrollment',
         instructions_sha256=producer['instructions_sha256'], runtime=dict(status='completed', thread_id='fresh-thread-id',
-        cli_version='1.0', credential_store='keyring', event_stream_sha256='c'*64, turn_id=None),
+        cli_version='1.0', credential_store='keyring', event_stream_sha256='c'*64, turn_id=None, startup_notice_sha256=[]),
         started_at='2026-11-15T11:00:00Z', completed_at='2026-11-15T11:30:00Z', review=review,
         report_sha256=gate.digest(gate.canonical(review)))
     comment = dict(id=1, user=dict(id=gate.OWNER_ID,type='User'), created_at='2026-11-15T11:31:00Z', updated_at='2026-11-15T11:31:00Z', body=gate.MARKER+json.dumps(receipt))
@@ -37,6 +37,17 @@ class ReceiptTests(unittest.TestCase):
         gate.validate_receipt(self.receipt, self.producer, self.current, 'e'*64, NOW)
     def test_complete_current_receipt(self):
         self.valid()
+    def test_missing_extra_and_wrong_typed_receipt_runtime_fields_refuse(self):
+        for group in (None,'runtime','review'):
+            original=self.receipt if group is None else self.receipt[group]
+            for field in original:
+                bad=copy.deepcopy(self.receipt);target=bad if group is None else bad[group];del target[field]
+                with self.subTest(group=group,field=field),self.assertRaises(gate.Rejected):gate.validate_receipt(bad,self.producer,self.current,'e'*64,NOW)
+            bad=copy.deepcopy(self.receipt);target=bad if group is None else bad[group];target['unexpected']='data'
+            with self.assertRaises(gate.Rejected):gate.validate_receipt(bad,self.producer,self.current,'e'*64,NOW)
+        for mutate in (lambda r:r.update(capture_id='invalid'),lambda r:r['runtime'].update(turn_id='invented'),lambda r:r['runtime'].update(event_stream_sha256=123)):
+            bad=copy.deepcopy(self.receipt);mutate(bad)
+            with self.assertRaises(gate.Rejected):gate.validate_receipt(bad,self.producer,self.current,'e'*64,NOW)
     def test_tuple_drift_every_field(self):
         for field in self.current:
             with self.subTest(field=field):

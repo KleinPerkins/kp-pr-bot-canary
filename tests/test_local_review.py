@@ -66,6 +66,9 @@ class CaptureTests(unittest.TestCase):
    bad[-1],bad[-2]=bad[-2],bad[-1]
    with self.assertRaises(m.CaptureError):m.captured_report(self.raw(bad),json.dumps(self.report))
   with self.assertRaises(m.CaptureError):m.captured_report(self.raw(events[:-1]),json.dumps(self.report))
+  for kind in ('item.started','item.updated'):
+   bad=self.events();bad.insert(2,{'type':kind,'item':{'type':'error','message':next(iter(m.STARTUP_NOTICES))}})
+   with self.assertRaisesRegex(m.CaptureError,'completed event'):m.captured_report(self.raw(bad),json.dumps(self.report))
  def test_process_limits_failure_timeout(self):
   import sys
   with self.assertRaises(m.CaptureError):m.run([sys.executable,'-c','raise SystemExit(1)'])

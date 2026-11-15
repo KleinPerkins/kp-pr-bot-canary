@@ -93,6 +93,14 @@ This example is not an enrollment or instruction to enable the shipped policy.
 
 ## CI and control binding
 
+The ruleset-list, ruleset-detail and branch-rules GET endpoints require Metadata
+read permission, including for GitHub App installation tokens; they do not require
+Administration read. GitHub documents this in [REST repository rules](https://docs.github.com/en/rest/repos/rules).
+Metadata read is inherent in the installation. Administration is therefore not
+requested. Rule-suite evaluation-history endpoints are different and are not used.
+Read access can redact bypass actors; the owner-visible preimage remains a separate
+cutover check as described below.
+
 Native workflow **CI** supplies `contract`, `ci-negative`, `local-review`, `app-gate`, and `ci-required` from
 GitHub Actions producer **15368**. The latest PR run and latest attempt must be
 completed and successful; all five jobs must succeed, including the fail-closed
