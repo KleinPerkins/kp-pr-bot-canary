@@ -74,6 +74,16 @@ and input over 1 MiB fail closed; they need a separately qualified review route.
 
 ## Launch and capture
 
+The active authoring agent automatically coordinates this step as part of PR
+delivery; the operator does not run a review command or review the code. It first
+binds the PR-creation account to its private owner-enrolled profile, freezes the
+current head/base/trusted policy, and invokes the qualified route. After any
+relevant tuple change it captures a new review and resolves findings before
+publishing an unedited receipt for the App. The command below is the coordinator's
+interface, not an operator handoff. An unknown origin or unavailable matching
+runtime remains blocked until that same-account coordinator can resume. This
+source introduces no always-on review daemon or GitHub self-hosted runner.
+
 ```sh
 python3 scripts/local_review.py \
   --repo /absolute/clean/checkout \
