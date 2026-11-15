@@ -72,13 +72,20 @@ class CaptureTests(unittest.TestCase):
    root=Path(kwargs['cwd']);roots.append(root)
    self.assertEqual((root/'instructions.txt').read_text(),m.INSTRUCTIONS)
    Path(argv[argv.index('--output-last-message')+1]).write_text(json.dumps(self.report))
-   return self.raw(self.events())
+   events=self.events()
+   for message in m.STARTUP_NOTICES:
+    events.insert(0,{'type':'item.completed','item':{'type':'error','message':message}})
+   return self.raw(events)
   request={'origin_account':'origin1'}
   for after in (self.account,{'type':'chatgpt','email':'wrong@example.invalid'}):
    with patch.object(m,'account_read',side_effect=[self.account,after]),patch.object(m,'run',side_effect=fake_run),patch.object(m,'frozen_input',return_value={'tuple':request}):
     if after==self.account:
      receipt=m.capture(Path('/unused'),request,b'policy',self.enrollment)
      self.assertNotIn(self.enrollment['email'],json.dumps(receipt))
+     self.assertNotIn(self.enrollment['codex_home'],json.dumps(receipt))
+     self.assertNotIn('startup_notices',receipt['runtime'])
+     self.assertEqual(set(receipt['runtime']['startup_notice_sha256']),{m.digest(n) for n in m.STARTUP_NOTICES})
+     self.assertTrue(all(n not in json.dumps(receipt) for n in m.STARTUP_NOTICES))
      self.assertEqual(receipt['report_sha256'],m.digest(m.canonical(self.report)))
     else:
      with self.assertRaises(m.CaptureError):m.capture(Path('/unused'),request,b'policy',self.enrollment)

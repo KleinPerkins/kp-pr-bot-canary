@@ -11,10 +11,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARDS = {
-    "contract": ["tests/test_canary_contract.py"],
-    "ci-negative": ["tests/test_ci.py"],
-}
+SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py'], 'app-gate': ['tests/test_reviewer_app.py']}
 IDENTITY_KEYS = ("repository", "repository_id", "event", "revision", "workflow_sha",
                  "run_id", "run_attempt", "ref", "head_sha", "base_sha", "workflow_ref", "workflow")
 
@@ -105,7 +102,7 @@ def main() -> None:
         for paths in SHARDS.values():
             for path in paths:
                 subprocess.run([sys.executable, "-I", "-B", path], cwd=ROOT, check=True)
-        print("Both local shards passed; hosted execution is unqualified")
+        print("All local shards passed; hosted execution is unqualified")
     elif args.mode == "shard":
         require(args.shard is not None, "a shard is required")
         run_shard(args.shard)
@@ -114,6 +111,7 @@ def main() -> None:
         expected = identity(dict(os.environ))
         check_checkout(expected)
         validate_aggregate(json.loads(os.environ.get("CI_NEEDS", "null")), expected)
+        print("CANARY_CI_AGGREGATE_V1 " + json.dumps({"schema": "canary-ci-aggregate/v1", "identity": expected, "result": "success"}, sort_keys=True, separators=(",", ":")))
         print("ci-required: every required shard passed for this exact run and revision")
 
 

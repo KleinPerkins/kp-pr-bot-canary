@@ -20,6 +20,12 @@
     ],
     "ci-negative": [
       "tests/test_ci.py"
+    ],
+    "local-review": [
+      "tests/test_local_review.py"
+    ],
+    "app-gate": [
+      "tests/test_reviewer_app.py"
     ]
   },
   "protected_paths": [

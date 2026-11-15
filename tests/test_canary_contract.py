@@ -8,7 +8,7 @@ import stat
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARDS = {"contract": ["tests/test_canary_contract.py"], "ci-negative": ["tests/test_ci.py"]}
+SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py'], 'app-gate': ['tests/test_reviewer_app.py']}
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 PR_ENV = {"CI_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
           "CI_BASE_SHA": "${{ github.event.pull_request.base.sha }}"}

@@ -100,11 +100,11 @@ Admission requires successful process exit, exactly one new thread and turn,
 definitive `turn.completed`, one complete agent report matching the direct last
 message, a valid closed report schema, and no unknown runtime error or tool items. CLI 0.148.0 serializes configuration
 warnings as `item.completed` with `type: error`; the two exact observed startup
-messages frozen in `STARTUP_NOTICES` are recorded in `runtime.startup_notices`.
+messages frozen in `STARTUP_NOTICES` are recorded as hashes in `runtime.startup_notice_sha256`; full notice text stays in private runtime evidence.
 They concern unknown `ultrafast_mode` speed policy and the stricter managed
 approval fallback to `UnlessTrusted`. All other error items, top-level errors,
 failed turns and unknown event types are fatal; tool items are rejected even
-when only started/updated. The App must bind its allowed notice strings to the
+when only started/updated. The App must bind its allowed notice hashes to the
 qualified producer enrollment. The
 adapter rechecks account and the local tuple after completion. Output/time bounds
 fail closed; child process groups are terminated/reaped and temporary files are

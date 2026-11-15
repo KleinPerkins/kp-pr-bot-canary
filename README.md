@@ -67,3 +67,7 @@ not manufacture hosted receipts. These checks qualify source behavior only.
 Use GitHub's private vulnerability reporting when available, or contact the
 repository owner privately. Do not place credentials or sensitive material in
 public issues, logs, fixtures or review evidence.
+
+## Integrated review checks
+
+Four nonempty CI shards run the repository contract, CI failure cases, local-review adapter tests and App-gate tests. `ci-required` verifies all four exact-run receipts and emits a bound aggregate record for the trusted App. Local review uses separate enrolled work and personal Codex profiles. The App remains disabled until actual source, credential, CI and control qualification; Q16 trusts enrolled local tooling operationally and does not claim protection against same-user receipt forgery.

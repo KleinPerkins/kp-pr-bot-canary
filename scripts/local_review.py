@@ -221,7 +221,7 @@ def capture(repo,request,policy,enrollment,cli='codex',timeout=600):
  return {'schema':SCHEMA,'capture_id':str(uuid.uuid4()),'trust_model':'q16-operational-local',
   'tuple':request,'reviewer_enrollment_id':enrollment['id'],'reviewer_origin_account':enrollment['origin_account'],
   'workspace_binding':'owner-declared-enrollment','instructions_sha256':digest(INSTRUCTIONS),
-  'runtime':{'cli_version':version,'credential_store':enrollment['credential_store'],'thread_id':thread,'turn_id':None,'status':'completed','event_stream_sha256':digest(raw),'startup_notices':[e['item']['message'] for e in map(json.loads,raw.decode().splitlines()) if e.get('type')=='item.completed' and e['item'].get('type')=='error']},
+  'runtime':{'cli_version':version,'credential_store':enrollment['credential_store'],'thread_id':thread,'turn_id':None,'status':'completed','event_stream_sha256':digest(raw),'startup_notice_sha256':[digest(e['item']['message']) for e in map(json.loads,raw.decode().splitlines()) if e.get('type')=='item.completed' and e['item'].get('type')=='error']},
   'started_at':started,'completed_at':utc(),'review':report,'report_sha256':digest(canonical(report))}
 
 def main():
