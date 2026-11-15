@@ -76,6 +76,16 @@ def stop(p):
  def terminate(sig):
   try:os.killpg(p.pid,sig)
   except ProcessLookupError:pass
+  except PermissionError:
+   # Darwin can report EPERM while an orphaned group is disappearing. Accept
+   # only observed absence; a still-present or inaccessible group fails closed.
+   deadline=time.monotonic()+.25
+   while time.monotonic()<deadline:
+    try:os.killpg(p.pid,0)
+    except ProcessLookupError:return
+    except PermissionError:pass
+    time.sleep(.01)
+   raise
  terminate(signal.SIGTERM)
  try:p.wait(timeout=3)
  except subprocess.TimeoutExpired:pass
@@ -84,10 +94,10 @@ def stop(p):
   p.wait()
 
 # stdout/stderr are bounded together; diagnostics are never emitted (may hold account data).
-def run(argv, *, cwd=None, input_data=b'', timeout=120):
+def run(argv, *, cwd=None, input_data=b'', timeout=120, env=None):
  with tempfile.TemporaryFile() as source:
   source.write(input_data);source.seek(0)
-  p=subprocess.Popen(argv,cwd=cwd,stdin=source,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,env=runtime_env())
+  p=subprocess.Popen(argv,cwd=cwd,stdin=source,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,env=runtime_env() if env is None else env)
   selector=selectors.DefaultSelector(); outputs={p.stdout:bytearray(),p.stderr:bytearray()}
   for stream in outputs:selector.register(stream,selectors.EVENT_READ)
   deadline=time.monotonic()+timeout
@@ -103,7 +113,8 @@ def run(argv, *, cwd=None, input_data=b'', timeout=120):
    require(p.returncode==0,'subprocess failed; no receipt')
    return bytes(outputs[p.stdout])
   finally:
-   stop(p);selector.close();p.stdout.close();p.stderr.close()
+   try:stop(p)
+   finally:selector.close();p.stdout.close();p.stderr.close()
 
 def account_read(cli,credential_store='keyring',timeout=30):
  p=subprocess.Popen([cli,'app-server','--stdio','-c','cli_auth_credentials_store='+json.dumps(credential_store),'-c','forced_login_method="chatgpt"'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,env=runtime_env())
@@ -131,7 +142,8 @@ def account_read(cli,credential_store='keyring',timeout=30):
   require(account.get('type')=='chatgpt' and isinstance(account.get('email'),str) and account['email'],'signed-in ChatGPT email required; API billing is not admitted')
   return {'type':account['type'],'email':account['email']}
  finally:
-  stop(p);selector.close();p.stdin.close();p.stdout.close()
+  try:stop(p)
+  finally:selector.close();p.stdin.close();p.stdout.close()
 
 def validate_enrollment(enrollment,account,origin):
  require(set(enrollment)=={'id','origin_account','email','workspace','cli_version','credential_store','codex_home'},'invalid enrollment fields')
@@ -142,7 +154,22 @@ def validate_enrollment(enrollment,account,origin):
  require(account.get('type')=='chatgpt' and account.get('email')==enrollment['email'],'runtime account differs from enrollment')
 
 def git(repo,*args):
- return run(['git','-C',str(repo),*args],timeout=30)
+ # Local inspection needs repository objects/index/config but must not execute
+ # repository filters, fsmonitor, hooks, a pager or inherited Git overrides.
+ # Discover driver names as data with Git's config parser, then neutralize every
+ # configured driver before commands that can inspect working-tree contents.
+ env={'PATH':'/usr/bin:/bin','LANG':'C','LC_ALL':'C','GIT_CONFIG_NOSYSTEM':'1',
+      'GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1',
+      'GIT_TERMINAL_PROMPT':'0','GIT_OPTIONAL_LOCKS':'0'}
+ argv=['/usr/bin/git','--no-pager','-C',str(repo),'-c','core.fsmonitor=false',
+       '-c','core.hooksPath='+os.devnull,'-c','core.attributesFile='+os.devnull,
+       '-c','credential.helper=','-c','diff.external=','-c','submodule.recurse=false',
+       '-c','diff.ignoreSubmodules=all','-c','status.submoduleSummary=false']
+ keys=run(argv+['config','--includes','--list','--name-only','--null'],timeout=30,env=env)
+ for key in sorted(set(keys.decode().split('\0'))):
+  match=re.fullmatch(r'filter\.(.+)\.(clean|smudge|process|required)',key,re.DOTALL)
+  if match:argv+=['-c',key+('=false' if match[2]=='required' else '=')]
+ return run(argv+list(args),timeout=30,env=env)
 
 def frozen_input(repo,request,policy):
  required={'repository','repository_id','head_sha','base_sha','merge_base_sha','diff_sha256','policy_sha256','origin_account'}
@@ -158,7 +185,8 @@ def frozen_input(repo,request,policy):
  name=request['repository']
  require(remote in (f'git@github.com:{name}.git',f'https://github.com/{name}.git',f'https://github.com/{name}'),'repository remote mismatch')
  require(git(repo,'rev-parse','HEAD').decode().strip()==request['head_sha'],'current HEAD mismatch')
- require(not git(repo,'status','--porcelain','--untracked-files=all'),'dirty repository')
+ require(not any(row.startswith(b'160000 ') for row in git(repo,'ls-files','--stage','-z').split(b'\0')),'submodule review unsupported')
+ require(not git(repo,'status','--porcelain','--untracked-files=all','--ignore-submodules=all'),'dirty repository')
  merge_base=git(repo,'merge-base',request['base_sha'],request['head_sha']).decode().strip()
  require(merge_base==request['merge_base_sha'],'merge-base mismatch')
  diff=git(repo,'diff','--no-ext-diff','--no-textconv','--no-color','--binary',request['base_sha']+'...'+request['head_sha'],'--')

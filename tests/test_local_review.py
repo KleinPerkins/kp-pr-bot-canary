@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 spec=importlib.util.spec_from_file_location('local_review',Path(__file__).parents[1]/'scripts/local_review.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -98,6 +98,10 @@ class CaptureTests(unittest.TestCase):
     if pidfile.exists():
      try:os.kill(int(pidfile.read_text()),signal.SIGKILL)
      except ProcessLookupError:pass
+ def test_cleanup_permission_error_requires_observed_group_absence(self):
+  p=Mock(pid=12345)
+  with patch.object(m.os,'killpg',side_effect=[None,PermissionError(),ProcessLookupError()]):m.stop(p)
+  with patch.object(m.os,'killpg',side_effect=PermissionError()),patch.object(m.time,'sleep'),patch.object(m.time,'monotonic',side_effect=[0,1]),self.assertRaises(PermissionError):m.stop(p)
 
  def test_capture_rechecks_account_and_keeps_email_private(self):
   roots=[]
@@ -165,6 +169,30 @@ class GitBindingTests(unittest.TestCase):
   with self.assertRaises(m.CaptureError):m.frozen_input(self.repo,self.request,b'new policy')
   (self.repo/'untracked').write_text('dirty')
   with self.assertRaises(m.CaptureError):m.frozen_input(self.repo,self.request,self.policy)
+ def test_git_inspection_does_not_execute_configured_or_ambient_helpers(self):
+  import shlex
+  local_marker=self.repo/'local-helper-ran'
+  ambient_marker=self.repo/'ambient-helper-ran'
+  (self.repo/'.gitattributes').write_text('*.py filter=probe\n')
+  self.git('add','.gitattributes');self.git('commit','-qm','attribute fixture')
+  command='touch '+shlex.quote(str(local_marker))+'; cat'
+  config=self.repo/'included-config'
+  config.write_text('[filter "probe"]\n clean = '+json.dumps(command)+'\n smudge = '+json.dumps(command)+'\n process = '+json.dumps(command)+'\n required = true\n')
+  self.git('config','include.path',str(config))
+  self.git('config','core.fsmonitor','touch '+shlex.quote(str(local_marker)))
+  # Force a fresh working-file inspection rather than trusting cached stat data.
+  source=self.repo/'calc.py';source.write_bytes(source.read_bytes())
+  injected={'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'core.fsmonitor',
+            'GIT_CONFIG_VALUE_0':'touch '+shlex.quote(str(ambient_marker)),
+            'GIT_CONFIG_PARAMETERS':"'core.fsmonitor=touch ignored'",'GIT_EXTERNAL_DIFF':'touch '+shlex.quote(str(ambient_marker))}
+  with patch.dict(os.environ,injected):
+   m.git(self.repo,'status','--porcelain','--untracked-files=all')
+   m.git(self.repo,'diff','--no-ext-diff','--no-textconv','--no-color','--binary',self.request['base_sha']+'...'+self.request['head_sha'],'--')
+  self.assertFalse(local_marker.exists(),'local fsmonitor/filter executed')
+  self.assertFalse(ambient_marker.exists(),'ambient Git configuration executed')
+ def test_submodule_index_refuses_without_child_traversal(self):
+  self.git('update-index','--add','--cacheinfo','160000',self.request['head_sha'],'child')
+  with self.assertRaisesRegex(m.CaptureError,'submodule review unsupported'):m.frozen_input(self.repo,self.request,self.policy)
  def test_profile_binding_and_runtime_version_drift(self):
   enrollment={'id':'e1','origin_account':'origin1','email':'owner@example.invalid','workspace':'w1','cli_version':'codex-cli 0.148.0','credential_store':'keyring','codex_home':str(Path(os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))).resolve())}
   account={'type':'chatgpt','email':'owner@example.invalid'}

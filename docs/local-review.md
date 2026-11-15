@@ -60,6 +60,13 @@ The request has exactly these fields (full lowercase commit/hash values):
 The adapter requires a clean local checkout at exactly `head_sha`, an exact
 GitHub origin remote match, and the expected merge base. `repository_id` is a
 positive integer supplied by the owner; the App verifies it against GitHub.
+Local Git inspection uses a minimal environment without inherited Git overrides,
+system/global configuration, credentials or runtime account state. It disables
+fsmonitor, hooks, external diff/textconv and every configured clean/smudge/process
+filter before examining the working tree. Local configuration is parsed as data
+to preserve repository/worktree identity and neutralize named filter drivers.
+Submodule traversal is disabled; a candidate index containing a Git submodule is
+refused because this bounded adapter cannot review its separate contents.
 The diff digest hashes the exact UTF-8 bytes emitted by:
 
 ```sh
