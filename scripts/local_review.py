@@ -71,11 +71,17 @@ def utc():
  return dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
 
 def stop(p):
- if p.poll() is None:
-  os.killpg(p.pid,signal.SIGTERM)
-  try:p.wait(timeout=3)
-  except subprocess.TimeoutExpired:
-   os.killpg(p.pid,signal.SIGKILL);p.wait()
+ # Every caller starts a private process group. Its descendants may still be
+ # alive after the leader exits, so leader completion is not group cleanup.
+ def terminate(sig):
+  try:os.killpg(p.pid,sig)
+  except ProcessLookupError:pass
+ terminate(signal.SIGTERM)
+ try:p.wait(timeout=3)
+ except subprocess.TimeoutExpired:pass
+ finally:
+  terminate(signal.SIGKILL)
+  p.wait()
 
 # stdout/stderr are bounded together; diagnostics are never emitted (may hold account data).
 def run(argv, *, cwd=None, input_data=b'', timeout=120):

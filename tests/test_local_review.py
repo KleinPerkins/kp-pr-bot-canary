@@ -62,6 +62,21 @@ class CaptureTests(unittest.TestCase):
   with self.assertRaises(m.CaptureError):m.run([sys.executable,'-c','raise SystemExit(1)'])
   with self.assertRaises(m.CaptureError):m.run([sys.executable,'-c','import time; time.sleep(10)'],timeout=.05)
   with patch.object(m,'MAX_OUTPUT',100),self.assertRaises(m.CaptureError):m.run([sys.executable,'-c','print("x"*200)'])
+ def test_exited_leader_cannot_leave_live_descendant(self):
+  import signal,sys,time
+  child=None
+  try:
+   program="import subprocess,sys; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(p.pid)"
+   child=int(m.run([sys.executable,'-c',program]).strip())
+   for _ in range(30):
+    state=subprocess.run(['ps','-p',str(child),'-o','stat='],text=True,capture_output=True).stdout.strip()
+    if not state or state.startswith('Z'):break
+    time.sleep(.05)
+   self.assertTrue(not state or state.startswith('Z'),'review subprocess descendant survived capture')
+  finally:
+   if child:
+    try:os.kill(child,signal.SIGKILL)
+    except ProcessLookupError:pass
 
  def test_capture_rechecks_account_and_keeps_email_private(self):
   roots=[]
