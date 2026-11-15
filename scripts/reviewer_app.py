@@ -22,6 +22,9 @@ import urllib.request
 REPOSITORY = 'KleinPerkins/kp-pr-bot-canary'
 REPOSITORY_ID = 1297059298
 APP_ID = 4217367
+APP_SLUG = 'chaos-scheduler-automerge'
+BOT_ID = 299927791
+CI_JOBS = ('contract', 'ci-negative', 'local-review', 'app-gate', 'ci-required')
 OWNER_ID = 49759187
 CI_APP_ID = 15368
 MARKER = '<!-- g1-review-receipt:v1 -->\n'
@@ -112,7 +115,7 @@ def validate_controls(repo, rules, rulesets):
                 and r.get('required_review_thread_resolution') is True and r.get('allowed_merge_methods') == ['squash']
                 for r in by_type.get('pull_request', [])), 'review controls missing')
     require(all(name in by_type for name in ('required_linear_history', 'deletion', 'non_fast_forward')), 'history protection missing')
-    # Preserve the established owner/admin PR-only exception. App-scoped reads
+    # Preserve distinct owner/admin history-only and PR-only exceptions. App-scoped reads
     # may redact bypass_actors; absence is unknown, never evidence of emptiness.
     source_ids = {r['ruleset_id'] for r in rules}
     require(source_ids and source_ids <= {r['id'] for r in rulesets}, 'rule source unavailable')
@@ -120,7 +123,10 @@ def validate_controls(repo, rules, rulesets):
         if rule['id'] in source_ids:
             require(rule.get('enforcement') == 'active', 'protection enforcement gap')
             if 'bypass_actors' in rule:
-                allowed = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'pull_request'}
+                effective_types = {r['type'] for r in rules if r['ruleset_id'] == rule['id']}
+                declared_types = {r['type'] for r in rule.get('rules', [])}
+                history_only = effective_types == declared_types == {'deletion', 'non_fast_forward'}
+                allowed = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always' if history_only else 'pull_request'}
                 require(isinstance(rule['bypass_actors'], list) and all(actor == allowed for actor in rule['bypass_actors']),
                         'unexpected/broadened bypass actor')
 
@@ -137,10 +143,11 @@ def validate_receipt(receipt, producer, current, policy_hash, now):
             and len(runtime['thread_id']) >= 8 and runtime.get('cli_version') == producer['cli_version']
             and runtime.get('credential_store') == producer['credential_store'], 'review runtime incomplete')
     require(re.fullmatch('[0-9a-f]{64}', runtime.get('event_stream_sha256', '')) is not None, 'missing direct capture digest')
-    notices = runtime.get('startup_notices', [])
-    allowed_notices = producer.get('allowed_startup_notices', [])
+    notices = runtime.get('startup_notice_sha256', [])
+    require('startup_notices' not in runtime, 'public receipt contains raw runtime notices')
+    allowed_notices = producer.get('allowed_startup_notice_sha256', [])
     require(isinstance(notices, list) and isinstance(allowed_notices, list)
-            and all(isinstance(n, str) and n in allowed_notices for n in notices), 'unqualified runtime notice')
+            and all(isinstance(n, str) and re.fullmatch('[0-9a-f]{64}', n) and n in allowed_notices for n in notices), 'unqualified runtime notice')
     started, completed = timestamp(receipt['started_at']), timestamp(receipt['completed_at'])
     require(started <= completed <= now and now - started <= dt.timedelta(hours=24), 'stale/future review')
     review = receipt['review']
@@ -225,11 +232,11 @@ def validate_ci_log(log, pr, merge_sha, run):
             except ValueError:
                 raise Rejected('malformed aggregate receipt') from None
     require(len(receipts) == 1, 'aggregate receipt missing/duplicated')
-    ref = f"refs/pull/{pr['number']}/merge"
-    expected = {'repository': REPOSITORY, 'repository_id': str(REPOSITORY_ID), 'event': 'pull_request',
+    ref = f"refs/pull/{pr['number']}/merge" if pr is not None else 'refs/heads/main'
+    expected = {'repository': REPOSITORY, 'repository_id': str(REPOSITORY_ID), 'event': 'pull_request' if pr is not None else 'push',
         'revision': merge_sha, 'workflow_sha': merge_sha, 'run_id': str(run['id']),
-        'run_attempt': str(run['run_attempt']), 'ref': ref, 'head_sha': pr['head']['sha'],
-        'base_sha': pr['base']['sha'], 'workflow_ref': REPOSITORY + '/.github/workflows/ci.yml@' + ref,
+        'run_attempt': str(run['run_attempt']), 'ref': ref, 'head_sha': pr['head']['sha'] if pr is not None else '',
+        'base_sha': pr['base']['sha'] if pr is not None else '', 'workflow_ref': REPOSITORY + '/.github/workflows/ci.yml@' + ref,
         'workflow': 'CI'}
     require(receipts[0] == {'schema': 'canary-ci-aggregate/v1', 'identity': expected, 'result': 'success'},
             'tested CI revision/base/head/run drift')
@@ -247,8 +254,12 @@ def validate_ci(api, prefix, pr, merge_sha):
     bindings = [p for p in run['pull_requests'] if p['number'] == pr['number']]
     require(len(bindings) == 1 and bindings[0]['head']['sha'] == pr['head']['sha']
             and bindings[0]['base']['sha'] == pr['base']['sha'], 'CI base/head drift')
+    validate_ci_jobs(api, prefix, pr, merge_sha, run)
+    return run['id'], run['run_attempt']
+
+def validate_ci_jobs(api, prefix, pr, merge_sha, run):
     jobs = api.pages(prefix + f"/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", 'jobs')
-    for name in ('contract', 'ci-negative', 'ci-required'):
+    for name in CI_JOBS:
         matching = [j for j in jobs if j['name'] == name]
         require(len(matching) == 1, 'missing/duplicate CI job ' + name)
         job = matching[0]
@@ -257,11 +268,10 @@ def validate_ci(api, prefix, pr, merge_sha):
         require(check_id.isdecimal(), 'invalid check ID')
         check = api.request(prefix + '/check-runs/' + check_id)
         require(check['app']['id'] == CI_APP_ID and check['name'] == name and check['status'] == 'completed'
-                and check['conclusion'] == 'success' and check['head_sha'] in (pr['head']['sha'], merge_sha)
+                and check['conclusion'] == 'success' and check['head_sha'] in ((pr['head']['sha'], merge_sha) if pr is not None else (merge_sha,))
                 and check['check_suite']['id'] == run['check_suite_id'], 'wrong CI producer/suite')
         if name == 'ci-required':
             validate_ci_log(api.job_log(job['id']), pr, merge_sha, run)
-    return run['id'], run['run_attempt']
 
 def snapshot(api, number, policy, policy_hash, now):
     prefix = '/repos/' + REPOSITORY
@@ -290,12 +300,55 @@ def snapshot(api, number, policy, policy_hash, now):
     return {'tuple': current, 'receipt': receipt, 'ci': ci, 'merge_sha': merge_sha,
             'node_id': pr['node_id'], 'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}, 'controls_sha256': digest(canonical([{k: repo[k] for k in ('id', 'default_branch', 'private', 'allow_squash_merge', 'allow_merge_commit', 'allow_rebase_merge', 'allow_auto_merge')}, rules, rulesets]))}
 
-def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug):
+def controls_snapshot(api):
+    prefix = '/repos/' + REPOSITORY
+    repo = api.request(prefix)
+    rules = api.request(prefix + '/rules/branches/main')
+    summaries = api.pages(prefix + '/rulesets?includes_parents=true')
+    rulesets = [api.request(prefix + '/rulesets/' + str(s['id'])) for s in summaries]
+    validate_controls(repo, rules, rulesets)
+    return {'controls_sha256': digest(canonical([repo, rules, rulesets])),
+            'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}}
+
+def validate_app_identity(read_api, app_api, app_slug, installation_id):
+    # Issuer proof is the trusted workflow's pinned create-token action with fixed
+    # App4217367 input and its unmodified outputs, not public bot metadata alone.
+    require(app_slug == APP_SLUG, 'wrong reviewer App slug')
+    require(isinstance(installation_id, str) and installation_id.isdecimal()
+            and int(installation_id) > 0, 'missing pinned-action installation identity')
+    bot = read_api.request('/users/' + app_slug + '[bot]')
+    require(bot.get('type') == 'Bot' and bot.get('login') == APP_SLUG + '[bot]'
+            and bot.get('id') == BOT_ID, 'wrong reviewer bot identity')
+    repositories = app_api.pages('/installation/repositories', 'repositories')
+    require(len(repositories) == 1 and repositories[0].get('id') == REPOSITORY_ID
+            and repositories[0].get('full_name') == REPOSITORY, 'App token is not repository scoped')
+    return {'app_id': APP_ID, 'slug': app_slug, 'bot_id': BOT_ID, 'installation_id': installation_id,
+            'repository_id': REPOSITORY_ID, 'issuer_proof': 'trusted-pinned-create-token-action'}
+
+def qualify_app(read_api, app_api, trusted, app_slug, installation_id):
+    require(not app_api.writable, 'qualification credential API must be read-only')
+    prefix = '/repos/' + REPOSITORY
+    require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved before qualification')
+    identity = validate_app_identity(read_api, app_api, app_slug, installation_id)
+    controls = controls_snapshot(app_api)
+    workflow = read_api.request(prefix + '/actions/workflows/ci.yml')
+    require(workflow['path'] == '.github/workflows/ci.yml' and workflow['state'] == 'active', 'CI workflow identity')
+    runs = read_api.pages(prefix + '/actions/workflows/' + str(workflow['id']) + '/runs?event=push&branch=main&head_sha=' + trusted, 'workflow_runs')
+    require(bool(runs), 'no current-main push CI')
+    run = max(runs, key=lambda r: (r['id'], r.get('run_attempt', 1)))
+    require(run.get('status') == 'completed' and run.get('conclusion') == 'success' and run.get('event') == 'push'
+            and run.get('head_branch') == 'main' and run.get('head_sha') == trusted
+            and run['repository']['id'] == REPOSITORY_ID and run['head_repository']['id'] == REPOSITORY_ID,
+            'main CI not current successful origin')
+    validate_ci_jobs(read_api, prefix, None, trusted, run)
+    require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved during qualification')
+    require(controls_snapshot(app_api) == controls, 'controls moved during qualification')
+    return dict(status='qualified-app-read-only', revision=trusted, ci=[run['id'], run['run_attempt']],
+                app=identity, mutated=False, **controls)
+
+def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug, installation_id):
     require(policy.get('enabled') is True, 'App writes disabled by trusted enrollment policy')
-    require(re.fullmatch('[a-z0-9-]+', app_slug or '') is not None, 'invalid App slug')
-    require(read_api.request('/apps/' + app_slug)['id'] == APP_ID, 'wrong reviewer App')
-    repositories = write_api.pages('/installation/repositories', 'repositories')
-    require([r['id'] for r in repositories] == [REPOSITORY_ID], 'App token is not repository scoped')
+    validate_app_identity(read_api, write_api, app_slug, installation_id)
     first = snapshot(read_api, number, policy, policy_hash, now)
     # Re-read all mutable gates immediately before every write. Native strict
     # required checks and stale-approval dismissal arbitrate races after this read.
@@ -304,7 +357,8 @@ def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug):
     approval = write_api.request('/repos/' + REPOSITORY + f'/pulls/{number}/reviews', 'POST',
         {'event': 'APPROVE', 'commit_id': head, 'body': 'G1: completed enrolled local review and current CI/control gates verified. Q16 operational trust applies.'})
     require(approval['state'] == 'APPROVED' and approval['commit_id'] == head
-            and approval['user']['login'] == app_slug + '[bot]', 'approval identity/result mismatch')
+            and approval['user']['login'] == app_slug + '[bot]' and approval['user']['id'] == BOT_ID
+            and approval['user']['type'] == 'Bot', 'approval identity/result mismatch')
     require(snapshot(read_api, number, policy, policy_hash, now) == first, 'admission drift after approval; auto-merge not armed')
     result = write_api.request('/graphql', 'POST', {'query': 'mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:SQUASH}){pullRequest{autoMergeRequest{mergeMethod}}}}', 'variables': {'id': first['node_id']}})
     require(not result.get('errors') and result['data']['enablePullRequestAutoMerge']['pullRequest']['autoMergeRequest']['mergeMethod'] == 'SQUASH', 'native auto-merge not confirmed')
@@ -312,10 +366,12 @@ def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pr', type=int, required=True)
-    parser.add_argument('--write', action='store_true')
+    parser.add_argument('--pr', type=int)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--write', action='store_true')
+    mode.add_argument('--qualify-app', action='store_true')
     args = parser.parse_args()
-    require(args.pr > 0, 'invalid PR')
+    require(args.qualify_app or (args.pr is not None and args.pr > 0), 'invalid PR')
     require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'wrong workflow repository')
     trusted = os.environ.get('TRUSTED_WORKFLOW_SHA', '')
     require(re.fullmatch('[0-9a-f]{40}', trusted) is not None, 'missing trusted workflow revision')
@@ -326,9 +382,13 @@ def main():
     read = API(os.environ.get('CI_READ_TOKEN'))
     require(read.request('/repos/' + REPOSITORY + '/git/ref/heads/main')['object']['sha'] == trusted, 'trusted default revision moved')
     now = dt.datetime.now(dt.timezone.utc)
-    if args.write:
+    if args.qualify_app:
+        require(os.environ.get('REVIEWER_APP_QUALIFY') == 'true', 'App qualification flag disabled')
+        require(os.environ.get('REVIEWER_APP_ENABLED') != 'true', 'qualification requires writer flag OFF')
+        result = qualify_app(read, API(os.environ.get('APP_TOKEN')), trusted, os.environ.get('APP_SLUG'), os.environ.get('APP_INSTALLATION_ID'))
+    elif args.write:
         require(os.environ.get('REVIEWER_APP_ENABLED') == 'true', 'App write flag disabled')
-        result = deliver(read, API(os.environ.get('APP_TOKEN'), writable=True), args.pr, policy, digest(policy_bytes), now, os.environ.get('APP_SLUG'))
+        result = deliver(read, API(os.environ.get('APP_TOKEN'), writable=True), args.pr, policy, digest(policy_bytes), now, os.environ.get('APP_SLUG'), os.environ.get('APP_INSTALLATION_ID'))
     else:
         proof = snapshot(read, args.pr, policy, digest(policy_bytes), now)
         result = {'status': 'qualified-read-only', 'tuple': proof['tuple'], 'ci': proof['ci'], 'bypass_visibility': proof['bypass_visibility'], 'mutated': False}

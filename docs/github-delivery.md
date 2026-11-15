@@ -16,7 +16,7 @@ same local/GitHub privileges from fabricating, deleting, or replacing receipts.
 Hashes bind bytes; they are not provider signatures or independent attestations.
 Unknown GitHub senders and producers fail admission. Account emails and workspace
 identity enrollment evidence stay private. Only opaque origin/enrollment identifiers,
-qualified runtime version/store, frozen instruction hash, and the owner GitHub ID
+qualified runtime version/store, frozen instruction and startup-notice hashes, and the owner GitHub ID
 belong in the public producer policy. Public receipt text needs exposure review too.
 
 The independent review is a fresh completed runtime thread launched by the trusted
@@ -49,7 +49,9 @@ UTF-8, sorted keys, compact separators, `ensure_ascii=False`.
 The gate checks `reviewer_enrollment_id`, matching `reviewer_origin_account`,
 `workspace_binding=owner-declared-enrollment`, frozen `instructions_sha256`,
 qualified `runtime.cli_version` and `runtime.credential_store`, only explicitly
-enrolled `allowed_startup_notices` (unknown notices reject), a nonempty fresh
+enrolled `allowed_startup_notice_sha256` (unknown hashes reject). Public runtime
+`startup_notice_sha256` contains SHA-256 digests only; raw notices reject and private
+account, workspace, path and configuration text stays in private qualification evidence, a nonempty fresh
 thread identifier, `runtime.status=completed`, and direct event-stream digest.
 Start/completion must be ordered, not future-dated, and within 24 hours. Review
 must have `verdict=pass`, `coverage=complete`, a nonempty summary, and no findings
@@ -79,7 +81,7 @@ Producer entries are owner-qualified records with these fields:
   "instructions_sha256": "qualified-frozen-instruction-sha256",
   "cli_version": "qualified-version",
   "credential_store": "keyring",
-  "allowed_startup_notices": []
+  "allowed_startup_notice_sha256": []
 }
 ```
 
@@ -87,14 +89,14 @@ This example is not an enrollment or instruction to enable the shipped policy.
 
 ## CI and control binding
 
-Native workflow **CI** supplies `contract`, `ci-negative`, and `ci-required` from
+Native workflow **CI** supplies `contract`, `ci-negative`, `local-review`, `app-gate`, and `ci-required` from
 GitHub Actions producer **15368**. The latest PR run and latest attempt must be
-completed and successful; all three jobs must succeed, including the fail-closed
+completed and successful; all five jobs must succeed, including the fail-closed
 aggregate. Every check must match the workflow run's check suite and head/merge
 revision. The run's PR head/base must equal the current PR tuple. The current
 synthetic merge commit must have exactly `[current main, current PR head]` as
 parents. The CI shards themselves assert checkout/ref/event/source identity and parent
-ordering. After validating both shard receipts, the aggregate emits exactly one
+ordering. After validating every shard receipt, the aggregate emits exactly one
 `CANARY_CI_AGGREGATE_V1 ` JSON log record with schema `canary-ci-aggregate/v1`,
 its complete `identity` and `result=success`. The App reads that exact aggregate
 job's bounded log and compares every field to the current merge SHA, base/head,
@@ -106,8 +108,11 @@ Effective main rules must require strict `ci-required@15368`, at least one appro
 stale-approval dismissal, resolved conversations, squash-only PR merging, linear history, no deletion
 and no non-fast-forward updates. Repository metadata must allow squash/auto-merge and
 disallow merge commits and rebase. All contributing rulesets must be active. Where bypass fields are visible, only the
-established `RepositoryRole` actor 5 with `pull_request` bypass is allowlisted;
-broader or App bypass is rejected. App reads can redact that field: the result
+established `RepositoryRole` actor 5 with `pull_request` bypass is allowlisted
+for merge controls. A distinct ruleset whose declared and effective rules are exactly
+`deletion` and `non_fast_forward` preserves actor 5 with `always` bypass for that
+history-only ruleset. This does not permit `always` on merge, CI or review controls.
+Broader or App bypass is rejected. App reads can redact that field: the result
 reports this as `redacted-or-unavailable`, never observed empty. Root owner-authenticated
 GETs must qualify the exact preserved bypass policy during cutover. This helper
 never exercises that owner authority. Missing API fields,
@@ -134,14 +139,30 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    PR-only first-admission route. This script never performs that bypass.
 4. Verify merged-main CI, add the strict 15368/current-review/history/squash controls
    while retaining legacy blockers, and qualify App 4217367 identity and one-repository
-   token scope. Preserve only the accepted owner PR-only bypass. Provisioning secrets
+   token scope. Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
    and changing repository controls are separate root-owned operations.
 5. Qualify each actual account/runtime capture, frozen instruction bytes and complete
    fresh review. Add only its opaque enrolled producer record in reviewed trusted
    source. A policy edit invalidates previous policy-bound receipts.
-6. Dispatch **Reviewer App** on main with a PR number for read-only qualification.
-   Its checkout must equal `github.workflow_sha` and live main. Qualification uses
-   `CI_READ_TOKEN`, never App credentials. It changes no PR or repository state.
+6. With `REVIEWER_APP_ENABLED` OFF, set the separate qualification variable
+   `REVIEWER_APP_QUALIFY=true` and dispatch **Reviewer App**, mode `app`, on main.
+   No PR number or enrolled receipt is needed. The trusted checkout must equal
+   `github.workflow_sha` and live main. The pinned create-token action requests
+   App4217367 with read-only contents/PR permissions and exactly this repository;
+   the helper receives its token, slug and installation-ID outputs directly. It
+   checks the expected bot `chaos-scheduler-automerge[bot]` (299927791), a live
+   installation credential and exactly one accessible repository. Bot metadata
+   alone is not issuer proof: the fixed App ID input and pinned trusted mint
+   action bind the credential issuer. No public `/apps/{slug}` lookup is required
+   for the private App. The helper's App API client disallows all writes.
+   Qualification verifies current controls through that credential and latest
+   successful current-main push CI, all five job producers, and the aggregate
+   log's exact current revision/run/attempt. Main push receipts use `event=push`,
+   `ref=refs/heads/main`, and empty PR head/base strings. It rechecks main and
+   controls for drift. Legacy blockers stay required during this qualification.
+   Mint and revocation are credential lifecycle operations; no PR, control,
+   enrollment, approval or auto-merge mutation occurs. Mode `receipt` with a PR
+   number retains the separate ordinary CI-token-only receipt snapshot.
 7. In the accepted exact control transaction, remove retired blockers after proving
    successor controls. Enable the policy and repository write flag only at the root
    gate. New authenticated receipt comments and successful CI workflow completions
@@ -151,7 +172,7 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    live base-race negatives. Verify merged revision/default-branch ancestry and all
    required gates; enabling auto-merge alone is not delivery.
 
-Rollback disables `REVIEWER_APP_ENABLED` and policy admission, preserving existing
+Rollback disables `REVIEWER_APP_ENABLED`, `REVIEWER_APP_QUALIFY` and policy admission, preserving existing
 protections and evidence. Do not weaken checks or use this helper to manually merge.
 The GitHub token action scopes credentials to this repository and revokes its token
 in its cleanup hook. A failed revoke requires root diagnosis; mocked tests do not

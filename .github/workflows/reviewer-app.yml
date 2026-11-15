@@ -7,10 +7,15 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      mode:
+        description: Read-only qualification target
+        type: choice
+        options: [receipt, app]
+        default: receipt
       pr:
         description: Pull request number for read-only qualification
         type: string
-        required: true
+        required: false
 permissions:
   contents: read
   actions: read
@@ -44,6 +49,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Resolve bounded PR number from event data
         id: target
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'app'
         run: |
           python3 -I -B - <<'PY'
           import json, os
@@ -64,11 +70,37 @@ jobs:
               output.write(f'pr={number}\n')
           PY
       - name: Qualify current receipt, CI, controls and trusted source without writes
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'app'
         env:
           CI_READ_TOKEN: ${{ github.token }}
           TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           TARGET_PR: ${{ steps.target.outputs.pr }}
         run: python3 -I -B scripts/reviewer_app.py --pr "$TARGET_PR"
+      # Qualification mints a read-only installation token with the writer OFF.
+      # Issuer provenance is this trusted pinned action with the fixed App ID.
+      - name: Mint read-only repository App qualification token
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'app' && vars.REVIEWER_APP_QUALIFY == 'true' && vars.REVIEWER_APP_ENABLED != 'true'
+        id: qualification
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: '4217367'
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          owner: KleinPerkins
+          repositories: kp-pr-bot-canary
+          permission-contents: read
+          permission-pull-requests: read
+          skip-token-revoke: false
+      - name: Qualify merged-main CI, live App identity, scope and controls
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'app'
+        env:
+          APP_TOKEN: ${{ steps.qualification.outputs.token }}
+          APP_SLUG: ${{ steps.qualification.outputs.app-slug }}
+          APP_INSTALLATION_ID: ${{ steps.qualification.outputs.installation-id }}
+          CI_READ_TOKEN: ${{ github.token }}
+          TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          REVIEWER_APP_QUALIFY: ${{ vars.REVIEWER_APP_QUALIFY }}
+          REVIEWER_APP_ENABLED: ${{ vars.REVIEWER_APP_ENABLED }}
+        run: python3 -I -B scripts/reviewer_app.py --qualify-app
       # Dispatch remains read-only even after enablement. Configuration starts
       # disabled with no producers; qualification never establishes enrollment.
       - name: Mint existing repository-scoped reviewer App token
@@ -88,6 +120,7 @@ jobs:
         env:
           APP_TOKEN: ${{ steps.app.outputs.token }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          APP_INSTALLATION_ID: ${{ steps.app.outputs.installation-id }}
           CI_READ_TOKEN: ${{ github.token }}
           TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           REVIEWER_APP_ENABLED: ${{ vars.REVIEWER_APP_ENABLED }}
