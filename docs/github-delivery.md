@@ -172,20 +172,7 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    from producer 4274739; the post-cutover write path does not require them.
    Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
    and changing repository controls are separate root-owned operations.
-5. Qualify each actual account/runtime capture, frozen instruction bytes and complete
-   fresh review. Add only its opaque enrolled producer record in independently reviewed
-   source. An empty trusted registry cannot admit its own enrollment PR. Prepare that
-   exact candidate, its account-bound creation record, automatic originating-account
-   review and hosted CI before requesting an exact owner/admin bootstrap-completion
-   admission. That administrative action is separate from the earlier source bootstrap
-   and is not human technical review or an ordinary delivery bypass. The candidate may
-   set policy `enabled=true` while repository `REVIEWER_APP_ENABLED` remains OFF,
-   avoiding another circular policy-activation admission. Retain legacy blockers,
-   verify the admitted main revision and CI, then qualify genuine enrolled receipt
-   acceptance and intended negatives on trusted main before root cutover. A policy
-   edit invalidates previous policy-bound receipts. Never use candidate policy as
-   trusted-main authority or enable writes to bootstrap an unknown producer.
-6. With `REVIEWER_APP_ENABLED` OFF, set the separate qualification variable
+5. Before admitting enrolled source, with `REVIEWER_APP_ENABLED` OFF, set the separate qualification variable
    `REVIEWER_APP_QUALIFY=true` and dispatch **Reviewer App**, mode `app`, on main.
    No PR number or enrolled receipt is needed. The trusted checkout must equal
    `github.workflow_sha` and live main. The pinned create-token action requests
@@ -204,6 +191,20 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    Mint and revocation are credential lifecycle operations; no PR, control,
    enrollment, approval or auto-merge mutation occurs. Mode `receipt` with a PR
    number retains the separate ordinary CI-token-only receipt snapshot.
+6. After the existing-main read-only App qualification above passes, qualify each
+   actual account/runtime capture, frozen instruction bytes and complete
+   fresh review. Add only its opaque enrolled producer record in independently reviewed
+   source. An empty trusted registry cannot admit its own enrollment PR. Prepare that
+   exact candidate, its account-bound creation record, automatic originating-account
+   review and hosted CI before requesting an exact owner/admin bootstrap-completion
+   admission. That administrative action is separate from the earlier source bootstrap
+   and is not human technical review or an ordinary delivery bypass. The candidate may
+   set policy `enabled=true` while repository `REVIEWER_APP_ENABLED` remains OFF,
+   avoiding another circular policy-activation admission. Retain legacy blockers,
+   verify the admitted main revision and CI, then qualify genuine enrolled receipt
+   acceptance and intended negatives on trusted main before root cutover. A policy
+   edit invalidates previous policy-bound receipts. Never use candidate policy as
+   trusted-main authority or enable writes to bootstrap an unknown producer.
 7. In the accepted exact control transaction, remove retired blockers after proving
    successor controls and enrolled review admission. The policy was admitted under
    the separate bootstrap-completion action with writes OFF; enable the repository
