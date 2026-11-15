@@ -10,6 +10,11 @@ This source state alone does not authorize writes. Workflow dispatch is always r
 live gate. Only existing App **4217367** approves a head and requests native **SQUASH**.
 No agent/manual merge command is part of this helper.
 
+Q22 explicitly authorizes both App-owned native paths after the same automated
+review, CI, head and GitHub protection checks. It authorizes this policy amendment
+and repair preparation; it does not admit this source or enable writes. The exact
+new owner/admin repair admission remains separate from the earlier PR99 admission.
+
 ## Trust and publication
 
 Q16 explicitly accepts an owner-enrolled local review adapter and authenticated
