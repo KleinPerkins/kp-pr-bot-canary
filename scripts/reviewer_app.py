@@ -59,6 +59,8 @@ class API:
         require(path.startswith('/') and not path.startswith('//'), 'invalid API path')
         headers = {'Authorization': 'Bearer ' + self.token, 'Accept': 'application/vnd.github+json',
                    'X-GitHub-Api-Version': '2022-11-28'}
+        if data is not None:
+            headers['Content-Type'] = 'application/json'
         req = urllib.request.Request('https://api.github.com' + path, headers=headers,
                                      method=method, data=None if data is None else canonical(data))
         try:

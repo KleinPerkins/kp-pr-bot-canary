@@ -87,6 +87,15 @@ class ReceiptTests(unittest.TestCase):
         with self.assertRaises(gate.Rejected):self.choose([self.comment,dict(self.comment,id=2,body=gate.MARKER+json.dumps(failed))])
 
 class APIAndControlsTests(unittest.TestCase):
+    def test_write_payload_declares_json_content_type(self):
+        from unittest.mock import Mock
+        response=Mock();response.read.return_value=b'{}'
+        response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
+        with patch.object(gate.urllib.request,'urlopen',return_value=response) as opened:
+            gate.API('fixture',writable=True).request('/graphql','POST',{'query':'fixture'})
+        request=opened.call_args.args[0]
+        self.assertEqual(request.get_header('Content-type'),'application/json')
+        self.assertEqual(request.data,b'{"query":"fixture"}')
     def test_readonly_rejects_post_without_network(self):
         with self.assertRaises(gate.Rejected):gate.API('fake').request('/graphql','POST',{})
     def test_pagination_reads_past_first_page(self):
