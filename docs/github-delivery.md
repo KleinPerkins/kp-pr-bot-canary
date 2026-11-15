@@ -7,7 +7,7 @@ Its policy admission switch is enabled, but repository `REVIEWER_APP_ENABLED` mu
 remain OFF until the root verifies the accepted qualification and cutover gates.
 This source state alone does not authorize writes. Workflow dispatch is always read-only. Automated writes additionally require the repository variable
 `REVIEWER_APP_ENABLED` to equal `true`, enabled trusted enrollment policy, and every
-live gate. Only existing App **4217367** approves a head and arms native **SQUASH**.
+live gate. Only existing App **4217367** approves a head and requests native **SQUASH**.
 No agent/manual merge command is part of this helper.
 
 ## Trust and publication
@@ -151,16 +151,31 @@ never exercises that owner authority. Missing API fields,
 inaccessible rules, pagination overflow, unknown mergeability and stale source fail
 closed. The helper rechecks all gates before approval and again before arming.
 
-The enable-auto-merge mutation sends the reviewed current head as `expectedHeadOid`
-in its actual `EnablePullRequestAutoMergeInput`; GitHub rejects a head mismatch.
-GraphQL errors or missing squash confirmation reject without retrying or reporting
-`armed`. See [GitHub's input contract](https://docs.github.com/en/graphql/reference/pulls#enablepullrequestautomergeinput).
-The mutation has no expected-base compare-and-swap parameter.
+After approval and another complete admission check, the App reads the current
+PR state and main again. For `clean`, it calls `mergePullRequest` with **SQUASH**;
+for eligible `blocked`, it calls `enablePullRequestAutoMerge` with **SQUASH**.
+Unknown, conflicting, behind or changed state refuses delivery. This follows the
+reference CLI's [ready-versus-deferred selection](https://github.com/cli/cli/blob/trunk/pkg/cmd/pr/merge/merge.go).
+GitHub describes [auto-merge](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)
+as the option for PRs that cannot yet merge immediately. Both calls carry the
+reviewed head as `expectedHeadOid`; neither is an administrative bypass. The App
+never selects a second operation following an error, and never automatically
+retries an ambiguous mutation. Diagnostics expose bounded error types only.
+
+An immediate-merge response is independently read back: the PR must be merged by
+the enrolled App at the reviewed head into main; its squash commit must have the
+reviewed base as its single parent and the tested synthetic merge's exact tree.
+The commit must be current main or an ancestor of current main. Only that proof
+returns `merged`; a deferred confirmation returns `armed`. An ambiguous result
+requires read-only reconciliation before further action, since a failed response
+does not establish that GitHub made no change. Root still verifies merged-main CI.
+See [GitHub's input contracts](https://docs.github.com/en/graphql/reference/pulls).
+Neither mutation has an expected-base compare-and-swap parameter.
 A base can move after the last read. The final protection therefore depends on live
 native strict required checks and stale-approval behavior. Mocked race tests only
 prove local rejection when a changed snapshot is observed. They do not establish
 GitHub's race behavior or a completed merge; the live G1 base-race canary remains a
-mandatory root qualification. The helper reports `armed`, never `merged`.
+mandatory root qualification. Source tests do not qualify either live delivery path.
 
 ## Bootstrap and cutover
 
@@ -246,6 +261,20 @@ App response redacts them. Mint/revocation are credential lifecycle operations;
 no PR, control, enrollment, approval or auto-merge mutation occurs. Verify cleanup
 before continuing. Mode `receipt` with a PR number is the separate ordinary
 CI-token-only receipt snapshot used after both routes join at step 6.
+
+After the accepted successor-control cutover, use explicit dispatch mode
+`app-current` for subsequent read-only App qualification. It selects
+`--qualify-app --qualification-stage current`; mode `app` retains the original
+bootstrap stage and still requires both retired blockers. Current-stage
+qualification instead rejects required checks owned by retired App4274739 or
+named `pr-automation /...`, while enforcing the same strict CI, review, history,
+identity and credential requirements. Both stages require the writer OFF and
+qualification flag ON, current trusted-main CI, stable main/control readbacks,
+and successful token revocation. Neither mode can execute the writer steps or
+qualify a candidate checkout. A post-cutover source repair must be admitted by an
+authorized route, pass merged-main CI, and pass `app-current` before root considers
+reenabling writes. Existing head/base-bound receipts must be refreshed after main
+changes. The original bootstrap exception never silently authorizes a new repair.
 
 Rollback disables `REVIEWER_APP_ENABLED`, `REVIEWER_APP_QUALIFY` and policy admission, preserving existing
 protections and evidence. Do not weaken checks or use this helper to manually merge.
