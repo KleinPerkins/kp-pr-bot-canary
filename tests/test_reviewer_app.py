@@ -234,6 +234,18 @@ class CITests(unittest.TestCase):
         with self.assertRaises(gate.Rejected):gate.validate_ci(api,'/repos/'+gate.REPOSITORY,pr,'c'*40)
 
 class ReadinessTests(unittest.TestCase):
+    def test_bootstrap_requires_both_exact_legacy_blockers_but_delivery_does_not(self):
+        repo,rules,sets=APIAndControlsTests().controls()
+        gate.validate_controls(repo,rules,sets)
+        with self.assertRaisesRegex(gate.Rejected,'both legacy blockers'):
+            gate.validate_controls(repo,rules,sets,require_legacy=True)
+        required=rules[0]['parameters']['required_status_checks']
+        for name in ('pr-automation / verify','pr-automation / job:repo.kp-pr-bot-canary.m3-verify'):
+            required.append({'context':name,'integration_id':4274739})
+        gate.validate_controls(repo,rules,sets,require_legacy=True)
+        for index in (1,2):
+            bad=copy.deepcopy(rules);bad[0]['parameters']['required_status_checks'][index]['integration_id']=15368
+            with self.assertRaises(gate.Rejected):gate.validate_controls(repo,bad,sets,require_legacy=True)
     def fixture(self):
         read, _, run, jobs, checks = CITests().fixture()
         revision = 'c'*40
@@ -255,8 +267,10 @@ class ReadinessTests(unittest.TestCase):
         return gate.qualify_app(read,app,'c'*40,gate.APP_SLUG,'123')
     def test_main_readiness_no_writes_no_receipt_or_policy_enrollment_needed(self):
         read,app,*_=self.fixture()
-        with patch.object(gate,'controls_snapshot',return_value={'controls_sha256':'hash','bypass_visibility':{'1':'redacted-or-unavailable'}}), patch.object(app,'request') as app_request:
+        with patch.object(gate,'controls_snapshot',return_value={'controls_sha256':'hash','bypass_visibility':{'1':'redacted-or-unavailable'}}) as control_checks, patch.object(app,'request') as app_request:
             result=self.qualify(read,app)
+        self.assertEqual(control_checks.call_count,2)
+        self.assertTrue(all(call.kwargs=={'require_legacy':True} for call in control_checks.call_args_list))
         self.assertEqual(result['status'],'qualified-app-read-only')
         self.assertFalse(result['mutated'])
         self.assertEqual(result['revision'],'c'*40)
@@ -343,6 +357,26 @@ class ReadinessTests(unittest.TestCase):
 # This is a security contract, not a workflow snapshot. Names, descriptions,
 # comments, JSON formatting, and shell/Python whitespace are not pinned. The
 # privileged execution surface, credential wiring and admission guards are closed.
+class GitAncestryTests(unittest.TestCase):
+    def test_deepens_until_common_ancestor_and_stops(self):
+        calls=[];base='b'*40;head='a'*40
+        def command(*args,**kwargs):
+            calls.append((args,kwargs))
+            if args[0]=='merge-base':return None if len(calls)==2 else (base+'\n').encode()
+        self.assertEqual(gate.bounded_merge_base(command,base,head),base)
+        self.assertEqual([args[3] for args,_ in calls if args[0]=='fetch'],['--depth=256','--depth=512'])
+        self.assertTrue(all(kwargs=={'no_common_base_ok':True} for args,kwargs in calls if args[0]=='merge-base'))
+    def test_missing_ancestry_is_bounded_and_other_errors_do_not_retry(self):
+        calls=[]
+        def absent(*args,**kwargs):calls.append(args);return None
+        with self.assertRaisesRegex(gate.Rejected,'bounded review route'):gate.bounded_merge_base(absent,'b'*40,'a'*40)
+        self.assertEqual(len(calls),10)
+        self.assertEqual(calls[-2][3],'--depth=4096')
+        calls=[]
+        def broken(*args,**kwargs):calls.append(args);raise gate.Rejected('transport failure')
+        with self.assertRaisesRegex(gate.Rejected,'transport failure'):gate.bounded_merge_base(broken,'b'*40,'a'*40)
+        self.assertEqual(len(calls),1)
+
 class WorkflowContractTests(unittest.TestCase):
     CHECKOUT='actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
     TOKEN='actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510'

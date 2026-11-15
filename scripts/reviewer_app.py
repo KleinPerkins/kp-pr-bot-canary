@@ -99,7 +99,7 @@ class API:
                 return rows
         raise Rejected('pagination bound exhausted')
 
-def validate_controls(repo, rules, rulesets):
+def validate_controls(repo, rules, rulesets, *, require_legacy=False):
     require(repo['id'] == REPOSITORY_ID and repo['full_name'] == REPOSITORY, 'repository mismatch')
     require(repo['default_branch'] == 'main' and not repo.get('archived') and not repo.get('private'), 'repository posture')
     require(repo.get('allow_squash_merge') is True and repo.get('allow_merge_commit') is False
@@ -108,6 +108,13 @@ def validate_controls(repo, rules, rulesets):
     for rule in rules:
         by_type.setdefault(rule['type'], []).append(rule.get('parameters', {}))
     required = by_type.get('required_status_checks', [])
+    if require_legacy:
+        contexts = {(c.get('context'), c.get('integration_id')) for r in required
+                    if r.get('strict_required_status_checks_policy') is True
+                    for c in r.get('required_status_checks', [])}
+        require({('pr-automation / verify', 4274739),
+                 ('pr-automation / job:repo.kp-pr-bot-canary.m3-verify', 4274739)} <= contexts,
+                'bootstrap qualification requires both legacy blockers')
     require(any(r.get('strict_required_status_checks_policy') is True and
                 any(c.get('context') == 'ci-required' and c.get('integration_id') == CI_APP_ID
                     for c in r.get('required_status_checks', [])) for r in required), 'strict CI15368 required')
@@ -189,6 +196,17 @@ def choose_receipt(comments, enrollments, current, policy_hash, now):
     validate_receipt(receipt, producer, current, policy_hash, now)
     return receipt
 
+def bounded_merge_base(command, base, head):
+    for depth in (256, 512, 1024, 2048, 4096):
+        command('fetch', '--no-tags', '--no-recurse-submodules', '--depth='+str(depth),
+                'https://github.com/' + REPOSITORY + '.git', base, head)
+        value = command('merge-base', base, head, no_common_base_ok=True)
+        if value is not None:
+            merge_base = value.decode().strip()
+            require(re.fullmatch('[0-9a-f]{40}', merge_base) is not None, 'invalid merge base')
+            return merge_base
+    raise Rejected('common ancestry exceeds bounded review route')
+
 def git_tuple(head, base, token):
     for sha in (head, base):
         require(re.fullmatch('[0-9a-f]{40}', sha) is not None, 'invalid Git object')
@@ -197,7 +215,7 @@ def git_tuple(head, base, token):
                'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_ATTR_NOSYSTEM': '1',
                'GIT_TERMINAL_PROMPT': '0', 'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'http.https://github.com/.extraheader',
                'GIT_CONFIG_VALUE_0': 'AUTHORIZATION: basic ' + base64.b64encode(('x-access-token:' + token).encode()).decode()}
-        def command(*args):
+        def command(*args, no_common_base_ok=False):
             with tempfile.TemporaryFile() as output:
                 # Bound downloaded packs/output and CPU; no checkout, hooks, filters,
                 # submodules, external diff, textconv, or inherited credential helpers.
@@ -208,15 +226,15 @@ def git_tuple(head, base, token):
                 result = subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=',
                     '-c', 'protocol.file.allow=never', '-c', 'core.attributesFile=/dev/null', *args], cwd=temporary,
                     env=env, stdout=output, stderr=subprocess.DEVNULL, timeout=60, preexec_fn=limits)
+                if no_common_base_ok and result.returncode == 1:
+                    return None
                 require(result.returncode == 0, 'isolated Git data inspection failed')
                 output.seek(0)
                 data = output.read(MAX_DIFF + 1)
                 require(len(data) <= MAX_DIFF, 'diff/output exceeds bound')
                 return data
         command('init', '--bare', '.')
-        command('fetch', '--no-tags', '--no-recurse-submodules', '--depth=256',
-                'https://github.com/' + REPOSITORY + '.git', base, head)
-        merge_base = command('merge-base', base, head).decode().strip()
+        merge_base = bounded_merge_base(command, base, head)
         patch = command('-c', 'color.ui=false', 'diff', '--no-ext-diff', '--no-textconv', '--binary', base+'...'+head, '--')
         return merge_base, digest(patch)
 
@@ -300,13 +318,13 @@ def snapshot(api, number, policy, policy_hash, now):
     return {'tuple': current, 'receipt': receipt, 'ci': ci, 'merge_sha': merge_sha,
             'node_id': pr['node_id'], 'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}, 'controls_sha256': digest(canonical([{k: repo[k] for k in ('id', 'default_branch', 'private', 'allow_squash_merge', 'allow_merge_commit', 'allow_rebase_merge', 'allow_auto_merge')}, rules, rulesets]))}
 
-def controls_snapshot(api):
+def controls_snapshot(api, *, require_legacy=False):
     prefix = '/repos/' + REPOSITORY
     repo = api.request(prefix)
     rules = api.request(prefix + '/rules/branches/main')
     summaries = api.pages(prefix + '/rulesets?includes_parents=true')
     rulesets = [api.request(prefix + '/rulesets/' + str(s['id'])) for s in summaries]
-    validate_controls(repo, rules, rulesets)
+    validate_controls(repo, rules, rulesets, require_legacy=require_legacy)
     return {'controls_sha256': digest(canonical([repo, rules, rulesets])),
             'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}}
 
@@ -330,7 +348,7 @@ def qualify_app(read_api, app_api, trusted, app_slug, installation_id):
     prefix = '/repos/' + REPOSITORY
     require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved before qualification')
     identity = validate_app_identity(read_api, app_api, app_slug, installation_id)
-    controls = controls_snapshot(app_api)
+    controls = controls_snapshot(app_api, require_legacy=True)
     workflow = read_api.request(prefix + '/actions/workflows/ci.yml')
     require(workflow['path'] == '.github/workflows/ci.yml' and workflow['state'] == 'active', 'CI workflow identity')
     runs = read_api.pages(prefix + '/actions/workflows/' + str(workflow['id']) + '/runs?event=push&branch=main&head_sha=' + trusted, 'workflow_runs')
@@ -342,7 +360,7 @@ def qualify_app(read_api, app_api, trusted, app_slug, installation_id):
             'main CI not current successful origin')
     validate_ci_jobs(read_api, prefix, None, trusted, run)
     require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved during qualification')
-    require(controls_snapshot(app_api) == controls, 'controls moved during qualification')
+    require(controls_snapshot(app_api, require_legacy=True) == controls, 'controls moved during qualification')
     return dict(status='qualified-app-read-only', revision=trusted, ci=[run['id'], run['run_attempt']],
                 app=identity, mutated=False, **controls)
 

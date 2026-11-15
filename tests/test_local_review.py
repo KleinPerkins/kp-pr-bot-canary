@@ -21,6 +21,15 @@ class CaptureTests(unittest.TestCase):
  def raw(self,events):return ('\n'.join(json.dumps(e) for e in events)+'\n').encode()
  def test_direct_completed_capture(self):
   thread,report=m.captured_report(self.raw(self.events()),json.dumps(self.report));self.assertEqual(thread,'fresh-thread');self.assertEqual(report,self.report)
+ def test_event_order_must_be_one_fresh_thread_then_turn_and_report(self):
+  import itertools
+  events=self.events()
+  for variant in itertools.permutations(events):
+   if list(variant)==events:continue
+   with self.subTest(order=[e['type'] for e in variant]),self.assertRaises(m.CaptureError):m.captured_report(self.raw(variant),json.dumps(self.report))
+  for kind in ('item.started','item.updated'):
+   bad=[{'type':kind,'item':{'type':'reasoning','text':'premature'}}]+events
+   with self.assertRaises(m.CaptureError):m.captured_report(self.raw(bad),json.dumps(self.report))
  def test_missing_wrong_account_workspace_origin(self):
   for key in self.enrollment:
    e=dict(self.enrollment);e[key]=''

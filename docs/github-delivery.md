@@ -69,6 +69,10 @@ and refuses overflow rather than truncating. Candidate Git inspection strips the
 inherited environment (including App credentials), configuration, hooks, attributes,
 credential helpers and prompts; disables external diff/textconv; and sets CPU,
 file-size and wall-time limits. The fetch is read-only and has no submodule update.
+Ancestry fetches deepen from 256 through at most 4,096 commits when necessary to
+find the common ancestor. Each command retains its CPU, file-size and wall-time
+limits; missing ancestry at the final bound refuses admission without guessing.
+The coordinator must diagnose that unsupported history before delivery.
 
 Producer entries are owner-qualified records with these fields:
 
@@ -143,7 +147,9 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    PR-only first-admission route. This script never performs that bypass.
 4. Verify merged-main CI, add the strict 15368/current-review/history/squash controls
    while retaining legacy blockers, and qualify App 4217367 identity and one-repository
-   token scope. Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
+   token scope. Bootstrap qualification explicitly requires both historical checks
+   from producer 4274739; the post-cutover write path does not require them.
+   Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
    and changing repository controls are separate root-owned operations.
 5. Qualify each actual account/runtime capture, frozen instruction bytes and complete
    fresh review. Add only its opaque enrolled producer record in reviewed trusted

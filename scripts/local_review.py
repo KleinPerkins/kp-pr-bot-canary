@@ -220,6 +220,19 @@ def captured_report(raw,last):
  except (ValueError,UnicodeDecodeError):raise CaptureError('invalid or truncated event stream')
  require(all(isinstance(e,dict) for e in events),'invalid event object')
  require(all(e.get('type') in ('thread.started','turn.started','item.started','item.updated','item.completed','turn.completed') for e in events),'unknown event or review runtime failure')
+ phase='startup'
+ for event in events:
+  kind=event['type']
+  if kind=='thread.started':
+   require(phase=='startup','thread start out of order');phase='thread'
+  elif kind=='turn.started':
+   require(phase=='thread','turn start out of order');phase='turn'
+  elif kind=='turn.completed':
+   require(phase=='turn','turn completion out of order');phase='done'
+  else:
+   item=event.get('item') or {}
+   notice=item.get('type')=='error' and item.get('message') in STARTUP_NOTICES
+   require(phase=='turn' or (notice and phase in ('startup','thread')),'review item out of order')
  starts=[e for e in events if e.get('type')=='thread.started']
  require(len(starts)==1 and isinstance(starts[0].get('thread_id'),str) and starts[0]['thread_id'],'fresh thread ID missing')
  require(sum(e.get('type')=='turn.started' for e in events)==1,'expected exactly one fresh turn')
