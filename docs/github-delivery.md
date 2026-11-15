@@ -113,6 +113,14 @@ requested. Rule-suite evaluation-history endpoints are different and are not use
 Read access can redact bypass actors; the owner-visible preimage remains a separate
 cutover check as described below.
 
+Repository merge settings are read through one fixed GraphQL repository query.
+GitHub omits the corresponding REST fields for read-only App credentials; absence
+must not be interpreted as a disabled setting. The query checks the immutable
+repository identity and requires all four boolean settings. Missing fields, GraphQL
+errors, disagreement with visible REST fields, or disallowed settings reject. The
+read-only API permits only this exact query body as POST; arbitrary GraphQL queries
+and mutations remain refused. This requires no additional App permissions.
+
 Native workflow **CI** supplies `contract`, `ci-negative`, `local-review`, `app-gate`, and `ci-required` from
 GitHub Actions producer **15368**. The latest PR run and latest attempt must be
 completed and successful; all five jobs must succeed, including the fail-closed
@@ -155,6 +163,19 @@ GitHub's race behavior or a completed merge; the live G1 base-race canary remain
 mandatory root qualification. The helper reports `armed`, never `merged`.
 
 ## Bootstrap and cutover
+
+The one-time G1 bootstrap-completion transaction may also need to repair a verifier
+that cannot finish its own current-main read-only qualification. Such a repair is
+not authority to skip the gate. Prepare the exact reviewed repair, hosted CI and
+prospective read-only credential/control evidence first. The owner/admin request
+must explicitly disclose the failed trusted-main qualification and seek the exact
+sequence adjustment if the same transaction stages qualified enrollment with source
+policy enabled while the repository writer stays OFF and legacy blockers remain.
+Without that specific administrative acceptance, the candidate remains unadmitted.
+After accepted admission, immediately verify new-main CI and rerun trusted-main App
+readiness before enrolled-receipt qualification, control cutover or writer enablement.
+A prospective local probe is not trusted-main qualification. This bounded completion
+of the initial bootstrap is not a recurring bypass or human technical-review lane.
 
 1. Preserve exact source/settings/control preimages and clear actual public exposure.
    Review the combined CI/App/capture candidate independently under its originating
