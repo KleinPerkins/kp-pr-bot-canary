@@ -67,7 +67,7 @@ class ReceiptTests(unittest.TestCase):
                 r=copy.deepcopy(self.receipt);mutation(r)
                 with self.assertRaises(gate.Rejected):gate.validate_receipt(r,self.producer,self.current,'e'*64,NOW)
     def choose(self,comments,producers=None):
-        return gate.choose_receipt(comments,{'producers':producers or [self.producer]},self.current,'e'*64,NOW)
+        return gate.choose_receipt(comments,{'producers':producers or [self.producer]},self.current,'e'*64,NOW,{'origin_account':self.producer['origin_account']})
     def test_owner_receipt_required_untrusted_sender_cannot_bind(self):
         bad=copy.deepcopy(self.comment);bad['user']['id']=999
         with self.assertRaises(gate.Rejected):self.choose([bad])
@@ -77,14 +77,64 @@ class ReceiptTests(unittest.TestCase):
             with self.subTest(change=str(change)[:70]):
                 bad=dict(self.comment,**change)
                 with self.assertRaises(gate.Rejected):self.choose([bad])
-    def test_origin_is_oldest_binding_not_newest_receipt(self):
+    def test_receipts_cannot_reassign_creation_origin(self):
         other=dict(self.producer,id='other-producer',origin_account='other-origin')
         second=copy.deepcopy(self.receipt);second.update(reviewer_enrollment_id=other['id'],reviewer_origin_account=other['origin_account']);second['tuple']['origin_account']=other['origin_account']
+        with self.assertRaisesRegex(gate.Rejected,'frozen PR origin'):
+            self.choose([dict(self.comment,id=2,body=gate.MARKER+json.dumps(second))],[self.producer,other])
         with self.assertRaisesRegex(gate.Rejected,'frozen PR origin'):
             self.choose([self.comment,dict(self.comment,id=2,body=gate.MARKER+json.dumps(second))],[self.producer,other])
     def test_latest_failed_review_supersedes_old_pass(self):
         failed=copy.deepcopy(self.receipt);failed['review']['verdict']='fail'
         with self.assertRaises(gate.Rejected):self.choose([self.comment,dict(self.comment,id=2,body=gate.MARKER+json.dumps(failed))])
+
+class OriginTests(unittest.TestCase):
+    def setUp(self):
+        self.producer = dict(id='creator', enabled=True, origin_account='work-origin', github_user_id=gate.OWNER_ID,
+            cli_version='1.0', credential_store='keyring', creation_adapter_sha256='a'*64, capture_adapter_sha256='b'*64)
+        self.origin = dict(schema='g1-pr-origin/v1', trust_model='q16-operational-local',
+            creation_id='00000000-0000-4000-8000-000000000001', repository=gate.REPOSITORY, repository_id=gate.REPOSITORY_ID,
+            pull_request=7, pull_request_node_id='PR_7', github_user_id=gate.OWNER_ID, origin_account='work-origin',
+            creator_enrollment_id='creator', workspace_binding='owner-declared-enrollment', initial_head_sha='c'*40,
+            initial_base_sha='d'*40, pr_created_at='2026-11-15T11:00:01Z', started_at='2026-11-15T11:00:00Z',
+            completed_at='2026-11-15T11:00:02Z', runtime=dict(cli_version='1.0', credential_store='keyring',
+                account_checked_before=True, account_checked_after=True), creation_adapter_sha256='a'*64, capture_adapter_sha256='b'*64)
+        self.pr = dict(number=7,node_id='PR_7',user={'id':gate.OWNER_ID,'type':'User'},created_at=self.origin['pr_created_at'],
+            head={'repo':{'id':gate.REPOSITORY_ID}},base={'repo':{'id':gate.REPOSITORY_ID}},
+            body='Description\n<!-- g1-pr-creation:'+self.origin['creation_id']+' -->')
+        self.comment = dict(id=1,user={'id':gate.OWNER_ID,'type':'User'},created_at='2026-11-15T11:00:03Z',updated_at='2026-11-15T11:00:03Z')
+    def choose(self, origin=None, comments=None):
+        c=dict(self.comment,body=gate.ORIGIN_MARKER+json.dumps(self.origin if origin is None else origin))
+        return gate.choose_origin([c] if comments is None else comments, {'producers':[self.producer]}, self.pr, NOW)
+    def test_creation_binding_is_separate_and_survives_new_source_head(self):
+        self.assertEqual(self.choose(),self.origin)
+        self.pr['head']['sha']='e'*40;self.pr['base']['sha']='f'*40
+        self.assertEqual(self.choose(),self.origin)
+    def test_no_review_can_supply_missing_creation_binding(self):
+        _,_,_,review_comment=fixture()
+        for comments in ([],[review_comment]):
+            with self.assertRaises(gate.Rejected):self.choose(comments=comments)
+    def test_duplicate_edited_foreign_and_wrong_pr_binding_fail(self):
+        c=dict(self.comment,body=gate.ORIGIN_MARKER+json.dumps(self.origin))
+        for comments in ([c,c],[dict(c,updated_at='2026-11-15T11:02:00Z')],[dict(c,user={'id':999,'type':'User'})]):
+            with self.assertRaises(gate.Rejected):self.choose(comments=comments)
+        for key,value in [('number',8),('node_id','PR_OTHER'),('created_at','2026-11-15T10:00:00Z'),('body','No creation nonce')]:
+            old=self.pr[key];self.pr[key]=value
+            with self.assertRaises(gate.Rejected):self.choose()
+            self.pr[key]=old
+    def test_closed_schema_account_adapter_and_timing_fail_closed(self):
+        for key in self.origin:
+            bad=copy.deepcopy(self.origin);del bad[key]
+            with self.subTest(missing=key),self.assertRaises(gate.Rejected):self.choose(bad)
+        changes=[('origin_account','personal-origin'),('creator_enrollment_id','other'),('creation_adapter_sha256','c'*64),
+            ('capture_adapter_sha256','c'*64),('repository_id',True),('pull_request',True),('trust_model','signed'),
+            ('initial_head_sha','bad'),('started_at','2026-11-15T10:00:00Z'),('completed_at','2026-11-15T11:20:00Z'),
+            ('runtime',dict(self.origin['runtime'],account_checked_after=False))]
+        for key,value in changes:
+            bad=copy.deepcopy(self.origin);bad[key]=value
+            with self.subTest(field=key),self.assertRaises(gate.Rejected):self.choose(bad)
+        bad=dict(self.origin,extra='untrusted')
+        with self.assertRaises(gate.Rejected):self.choose(bad)
 
 class APIAndControlsTests(unittest.TestCase):
     def test_write_payload_declares_json_content_type(self):

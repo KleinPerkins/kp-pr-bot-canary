@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py'], 'app-gate': ['tests/test_reviewer_app.py']}
+SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py', 'tests/test_create_review_pr.py'], 'app-gate': ['tests/test_reviewer_app.py']}
 IDENTITY_KEYS = ("repository", "repository_id", "event", "revision", "workflow_sha",
                  "run_id", "run_attempt", "ref", "head_sha", "base_sha", "workflow_ref", "workflow")
 
@@ -98,7 +98,7 @@ def main() -> None:
     parser.add_argument("--shard", choices=SHARDS)
     args = parser.parse_args()
     if args.mode == "local":
-        require(args.shard is None, "local runs both shards")
+        require(args.shard is None, "local runs all shards")
         for paths in SHARDS.values():
             for path in paths:
                 subprocess.run([sys.executable, "-I", "-B", path], cwd=ROOT, check=True)

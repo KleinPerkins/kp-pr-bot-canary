@@ -25,6 +25,10 @@ id `1297059298`, default branch `main`. Preserve its narrow fixture purpose.
   require explicit contract updates; no wildcard code/workflow admission.
 - `.github/CODEOWNERS` protects policy, scripts, tests and operator docs.
   Independent originating-account substantive review remains a separate gate.
+- `scripts/create_review_pr.py`, `tests/test_create_review_pr.py` and
+  `docs/pr-creation.md` own the separately captured PR-creation account binding.
+  Create PRs through the trusted adapter after fresh review; a review receipt
+  cannot establish origin. Unknown or conflicting creation evidence blocks merge.
 - The authoring agent is the review coordinator. Automatically launch the fresh
   enrolled review before opening a ready PR, and again after any head, current
   base or trusted policy change. Use the PR-creation account's qualified route;

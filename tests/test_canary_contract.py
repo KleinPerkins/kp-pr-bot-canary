@@ -8,12 +8,12 @@ import stat
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py'], 'app-gate': ['tests/test_reviewer_app.py']}
+SHARDS = {'contract': ['tests/test_canary_contract.py'], 'ci-negative': ['tests/test_ci.py'], 'local-review': ['tests/test_local_review.py', 'tests/test_create_review_pr.py'], 'app-gate': ['tests/test_reviewer_app.py']}
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 PR_ENV = {"CI_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
           "CI_BASE_SHA": "${{ github.event.pull_request.base.sha }}"}
 CODE = {"scripts/verify.py", "tests/test_canary_contract.py", "tests/test_ci.py"}
-OPTIONAL_CODE = {"scripts/local_review.py", "tests/test_local_review.py", "scripts/reviewer_app.py", "tests/test_reviewer_app.py"}
+OPTIONAL_CODE = {"scripts/local_review.py", "tests/test_local_review.py", "scripts/reviewer_app.py", "tests/test_reviewer_app.py", "scripts/create_review_pr.py", "tests/test_create_review_pr.py"}
 OWNER_RULES = {"/.github/** @KleinPerkins", "/.github/pr-automation.json @KleinPerkins",
                "/.github/pr-verification.json @KleinPerkins", "/_ops/** @KleinPerkins",
                "/scripts/** @KleinPerkins", "/tests/** @KleinPerkins", "/docs/** @KleinPerkins",
@@ -52,7 +52,9 @@ def check_policy(root: Path) -> None:
     require(policy["integration_allowlist"] == ["scripts/local_review.py", "tests/test_local_review.py",
                                                "docs/local-review.md", ".github/workflows/reviewer-app.yml",
                                                "scripts/reviewer_app.py", "tests/test_reviewer_app.py",
-                                               "docs/github-delivery.md", ".github/review-enrollments.json"], "integration allowlist drift")
+                                               "docs/github-delivery.md", ".github/review-enrollments.json",
+                                               "scripts/create_review_pr.py", "tests/test_create_review_pr.py",
+                                               "docs/pr-creation.md"], "integration allowlist drift")
     require(policy["legacy"] == {"mode":"historical-until-control-cutover",
                                 "files":[".github/pr-automation.json", ".github/pr-recipe.json",
                                          ".github/pr-automation.lock.json", ".github/pr-verification.json"],

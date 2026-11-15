@@ -28,6 +28,7 @@ CI_JOBS = ('contract', 'ci-negative', 'local-review', 'app-gate', 'ci-required')
 OWNER_ID = 49759187
 CI_APP_ID = 15368
 MARKER = '<!-- g1-review-receipt:v1 -->\n'
+ORIGIN_MARKER = '<!-- g1-pr-origin:v1 -->\n'
 MAX_RECEIPT = 60000
 MAX_DIFF = 5000000
 ROOT = Path(__file__).resolve().parents[1]
@@ -177,7 +178,70 @@ def validate_receipt(receipt, producer, current, policy_hash, now):
             and isinstance(review.get('summary'), str) and review['summary'].strip(), 'review incomplete or findings')
     require(receipt.get('report_sha256') == digest(canonical(review)), 'report digest mismatch')
 
-def choose_receipt(comments, enrollments, current, policy_hash, now):
+def choose_origin(comments, enrollments, pr, now):
+    # Creation evidence is captured by the trusted adapter around the create API,
+    # independently of any later review. A review never selects the PR origin.
+    records = []
+    for comment in comments:
+        body = comment.get('body', '')
+        if not body.startswith(ORIGIN_MARKER):
+            continue
+        sender = comment.get('user', {})
+        if sender.get('id') != OWNER_ID or sender.get('type') != 'User':
+            continue
+        require(len(body.encode()) <= MAX_RECEIPT, 'origin exceeds bound')
+        require(comment['created_at'] == comment['updated_at'], 'edited creation binding')
+        try:
+            record = json.loads(body[len(ORIGIN_MARKER):])
+        except ValueError:
+            raise Rejected('invalid origin JSON') from None
+        records.append((comment, record))
+    require(len(records) == 1, 'exactly one independent creation binding required')
+    comment, origin = records[0]
+    fields = {'schema','trust_model','creation_id','repository','repository_id','pull_request',
+              'pull_request_node_id','github_user_id','origin_account','creator_enrollment_id',
+              'workspace_binding','initial_head_sha','initial_base_sha','pr_created_at','started_at',
+              'completed_at','runtime','creation_adapter_sha256','capture_adapter_sha256'}
+    require(isinstance(origin, dict) and set(origin) == fields, 'closed creation binding schema')
+    numeric = {'repository_id','pull_request','github_user_id'}
+    require(all(type(origin[k]) is int and origin[k] > 0 for k in numeric), 'creation identity type')
+    require(all(isinstance(origin[k], str) and origin[k] for k in fields-numeric-{'runtime'}), 'creation field type')
+    require(origin['schema'] == 'g1-pr-origin/v1' and origin['trust_model'] == 'q16-operational-local'
+            and origin['workspace_binding'] == 'owner-declared-enrollment', 'creation trust model')
+    require(re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', origin['creation_id']) is not None,
+            'invalid creation nonce')
+    require(origin['repository'] == REPOSITORY and origin['repository_id'] == REPOSITORY_ID
+            and origin['pull_request'] == pr['number'] and origin['pull_request_node_id'] == pr['node_id']
+            and origin['github_user_id'] == OWNER_ID == pr['user']['id'] and pr['user']['type'] == 'User'
+            and pr['head']['repo']['id'] == pr['base']['repo']['id'] == REPOSITORY_ID,
+            'creation PR identity mismatch')
+    require(origin['pr_created_at'] == pr['created_at'], 'creation server timestamp mismatch')
+    nonces = re.findall(r'<!-- g1-pr-creation:([^>]+) -->', pr.get('body') or '')
+    require(nonces == [origin['creation_id']], 'PR creation nonce missing or conflicting')
+    require(all(re.fullmatch('[0-9a-f]{40}', origin[k]) for k in ('initial_head_sha','initial_base_sha')),
+            'creation revision missing')
+    producers = [p for p in enrollments['producers'] if p.get('id') == origin['creator_enrollment_id']]
+    require(len(producers) == 1, 'unknown or duplicate creation producer')
+    producer = producers[0]
+    require(producer.get('enabled') is True and producer.get('github_user_id') == OWNER_ID
+            and producer.get('origin_account') == origin['origin_account'], 'creation enrollment mismatch')
+    for key in ('creation_adapter_sha256','capture_adapter_sha256'):
+        require(re.fullmatch('[0-9a-f]{64}', origin[key]) is not None and origin[key] == producer.get(key),
+                'unqualified creation adapter')
+    runtime = origin['runtime']
+    require(isinstance(runtime, dict) and set(runtime) == {'cli_version','credential_store','account_checked_before','account_checked_after'}
+            and runtime['cli_version'] == producer.get('cli_version') and runtime['credential_store'] == producer.get('credential_store')
+            and runtime['account_checked_before'] is True and runtime['account_checked_after'] is True,
+            'incomplete account-bound creation')
+    started, created, completed, posted = map(timestamp, [origin['started_at'], origin['pr_created_at'], origin['completed_at'], comment['created_at']])
+    # GitHub server timestamps have second precision; local timestamps may not.
+    slack = dt.timedelta(seconds=1)
+    require(started <= created + slack and created <= completed <= posted + slack
+            and started <= completed <= now and posted <= now
+            and posted - started <= dt.timedelta(minutes=10), 'creation operation timing invalid')
+    return origin
+
+def choose_receipt(comments, enrollments, current, policy_hash, now, origin):
     producers = {p['id']: p for p in enrollments['producers']}
     eligible = []
     for comment in comments:
@@ -204,8 +268,7 @@ def choose_receipt(comments, enrollments, current, policy_hash, now):
         eligible.append((comment['id'], receipt, producer))
     require(bool(eligible), 'no authenticated enrolled receipt')
     eligible.sort(key=lambda item: item[0])
-    origin = eligible[0][1]['tuple']['origin_account']
-    require(all(r['tuple']['origin_account'] == origin for _, r, _ in eligible), 'frozen PR origin mismatch')
+    require(all(r['tuple']['origin_account'] == origin['origin_account'] for _, r, _ in eligible), 'frozen PR origin mismatch')
     _, receipt, producer = eligible[-1]
     validate_receipt(receipt, producer, current, policy_hash, now)
     return receipt
@@ -327,9 +390,10 @@ def snapshot(api, number, policy, policy_hash, now):
     current = {'repository': REPOSITORY, 'repository_id': REPOSITORY_ID, 'head_sha': pr['head']['sha'],
                'base_sha': base, 'merge_base_sha': merge_base, 'diff_sha256': diff_hash, 'policy_sha256': policy_hash}
     comments = api.pages(prefix + f'/issues/{number}/comments')
-    receipt = choose_receipt(comments, policy, current, policy_hash, now)
+    origin = choose_origin(comments, policy, pr, now)
+    receipt = choose_receipt(comments, policy, current, policy_hash, now, origin)
     ci = validate_ci(api, prefix, pr, merge_sha)
-    return {'tuple': current, 'receipt': receipt, 'ci': ci, 'merge_sha': merge_sha,
+    return {'tuple': current, 'origin': origin, 'receipt': receipt, 'ci': ci, 'merge_sha': merge_sha,
             'node_id': pr['node_id'], 'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}, 'controls_sha256': digest(canonical([{k: repo[k] for k in ('id', 'default_branch', 'private', 'allow_squash_merge', 'allow_merge_commit', 'allow_rebase_merge', 'allow_auto_merge')}, rules, rulesets]))}
 
 def controls_snapshot(api, *, require_legacy=False):

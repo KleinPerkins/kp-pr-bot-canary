@@ -86,7 +86,11 @@ delivery; the operator does not run a review command or review the code. It firs
 binds the PR-creation account to its private owner-enrolled profile, freezes the
 current head/base/trusted policy, and invokes the qualified route. After any
 relevant tuple change it captures a new review and resolves findings before
-publishing an unedited receipt for the App. The command below is the coordinator's
+creating the PR through the [account-bound creation adapter](pr-creation.md)
+and publishing an unedited review receipt for the App. The creation adapter
+records the signed-in account around its own create operation, independently of
+this review. An existing PR must retain that creation binding; a later receipt
+cannot select a new account. The command below is the coordinator's
 interface, not an operator handoff. An unknown origin or unavailable matching
 runtime remains blocked until that same-account coordinator can resume. This
 source introduces no always-on review daemon or GitHub self-hosted runner.

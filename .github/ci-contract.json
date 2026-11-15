@@ -22,7 +22,8 @@
       "tests/test_ci.py"
     ],
     "local-review": [
-      "tests/test_local_review.py"
+      "tests/test_local_review.py",
+      "tests/test_create_review_pr.py"
     ],
     "app-gate": [
       "tests/test_reviewer_app.py"
@@ -47,7 +48,10 @@
     "scripts/reviewer_app.py",
     "tests/test_reviewer_app.py",
     "docs/github-delivery.md",
-    ".github/review-enrollments.json"
+    ".github/review-enrollments.json",
+    "scripts/create_review_pr.py",
+    "tests/test_create_review_pr.py",
+    "docs/pr-creation.md"
   ],
   "legacy": {
     "mode": "historical-until-control-cutover",

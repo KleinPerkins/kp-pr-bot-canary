@@ -58,12 +58,20 @@ must have `verdict=pass`, `coverage=complete`, a nonempty summary, and no findin
 or unresolved findings. Failed/incomplete latest receipts supersede old passing
 ones; they cannot silently fall back to an older pass.
 
-The oldest unedited enrolled owner receipt in the PR comment history binds that
-PR's origin. Later receipts must preserve it while refreshing the tuple after any
-head, base or policy change. Comment IDs establish ordering; edited, malformed,
-oversized or unknown-producer owner receipts fail closed. Untrusted senders cannot
-bind the origin. Freeze is operational within available comment history; Q16 does
-not supply tamper-proof persistence after an owner deletes history. A receipt is
+The trusted creation adapter captures the enrolled account before and after its
+own GitHub PR-create operation, then publishes a separate `g1-pr-origin/v1`
+record. See [PR creation](pr-creation.md). Exactly one unedited owner creation
+record must match this PR's numeric/node IDs, server creation time, repository,
+author and creation nonce in its body. The enrolled helper hashes and account
+runtime must match; creation and posting must complete within ten minutes.
+Missing, duplicate, malformed, edited or conflicting creation evidence blocks
+admission. Review receipts never establish or change the originating account.
+Every receipt must match the separately frozen creation account; a first review
+from another enabled account is rejected too. Later receipts refresh the current
+head/base/policy tuple without changing origin. Unknown/pre-existing or browser-
+created PRs without this qualified record remain blocked. Q16 operational trust
+still cannot protect against an owner fabricating or deleting comment history.
+A receipt is
 bounded to 60,000 bytes; Git diff/output to 5,000,000 bytes; pagination is bounded
 and refuses overflow rather than truncating. Candidate Git inspection strips the
 inherited environment (including App credentials), configuration, hooks, attributes,
@@ -85,7 +93,9 @@ Producer entries are owner-qualified records with these fields:
   "instructions_sha256": "qualified-frozen-instruction-sha256",
   "cli_version": "qualified-version",
   "credential_store": "keyring",
-  "allowed_startup_notice_sha256": []
+  "allowed_startup_notice_sha256": [],
+  "creation_adapter_sha256": "qualified-create-review-pr-source-sha256",
+  "capture_adapter_sha256": "qualified-local-review-source-sha256"
 }
 ```
 
