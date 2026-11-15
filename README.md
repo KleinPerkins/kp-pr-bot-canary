@@ -12,10 +12,11 @@ pinned checkout, read-only contents permission and no secrets. The `contract` sh
 checks repository identity, protected ownership, a closed workflow, accurate docs
 and the inert fixture boundary. The `ci-negative` shard executes failure tests for
 missing/failed/cancelled/skipped/stale receipts, source identity, unsafe workflow
-changes and an executable fixture. Both contain actual test suites.
+changes and an executable fixture. Both contain actual test suites; the `local-review` and `app-gate` shards exercise
+the integrated adapter and App controls.
 
 The configured required context is `ci-required` (GitHub Actions producer App
-`15368`). Its aggregate is defined to run after both shards, including failures,
+`15368`). Its aggregate is defined to run after all four shards, including failures,
 and fail unless the complete shard set passed for the same repository, event,
 revision, workflow revision, run id, run attempt and ref. A pull request tests its
 GitHub merge revision and verifies both base and head parents; a push tests the
@@ -37,6 +38,11 @@ gates. Source or local-test success does not mean Actions is enabled, a reposito
 is public, an App is qualified, or a ruleset has changed. No cloud qualification is
 claimed by this README.
 
+The Dev-managed `SECURITY.md` still contains the historical private/direct-push
+baseline during bootstrap. This README and the delivery guide describe the
+authorized transition. G1 remains incomplete until the Dev-owned template is
+updated and its generated policy is reconciled; do not hand-edit that block.
+
 ## Historical controls and coverage mapping
 
 The four `.github/pr-*` JSON files remain historical transition records until the
@@ -48,18 +54,18 @@ verified settings transaction; do not post lookalike retired checks.
 |---|---|
 | Canned regular, non-symlink control inputs | `contract`: successor policy, workflow, ownership, runner and legacy records |
 | Immutable repository, main and App identities | `contract`: repository `1297059298`, Actions `15368`, reviewer `4217367` |
-| Closed command/dependency topology and all-required aggregation | Both shards and exact-run `ci-required`; negative cases execute in `ci-negative` |
+| Closed command/dependency topology and all-required aggregation | All four shards and exact-run `ci-required`; negative cases execute in `ci-negative` |
 | Protected automation ownership | `contract`: explicit CODEOWNERS coverage of policy and source helpers |
 | No production/executable fixture surface | `contract` allowlist plus executable, symlink and unexpected-code regression tests |
 | Operator description matches design | `contract`: successor roles, historical files and qualification limits |
 
 The old custom context `pr-automation / job:repo.kp-pr-bot-canary.m3-verify` maps to
-the substantive two-shard coverage. The old `pr-automation / verify` aggregate maps
+the substantive four-shard coverage. The old `pr-automation / verify` aggregate maps
 to `ci-required` only after the accepted live control transition.
 
 ## Local verification
 
-Run `python3 -I -B scripts/verify.py local`. It executes both hosted shard suites
+Run `python3 -I -B scripts/verify.py local`. It executes all four hosted shard suites
 without network or GitHub credentials. Hosted `shard` and `aggregate` modes also
 require a valid GitHub run identity and an exact source checkout; local mode does
 not manufacture hosted receipts. These checks qualify source behavior only.
