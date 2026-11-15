@@ -68,15 +68,36 @@ class CaptureTests(unittest.TestCase):
   try:
    program="import subprocess,sys; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(p.pid)"
    child=int(m.run([sys.executable,'-c',program]).strip())
-   for _ in range(30):
-    state=subprocess.run(['ps','-p',str(child),'-o','stat='],text=True,capture_output=True).stdout.strip()
-    if not state or state.startswith('Z'):break
-    time.sleep(.05)
-   self.assertTrue(not state or state.startswith('Z'),'review subprocess descendant survived capture')
+   self.assert_descendant_stopped(child)
   finally:
    if child:
     try:os.kill(child,signal.SIGKILL)
     except ProcessLookupError:pass
+ def assert_descendant_stopped(self,child):
+  import sys,time
+  for _ in range(40):
+   try:os.kill(child,0)
+   except ProcessLookupError:return
+   if sys.platform.startswith('linux'):
+    try:
+     if Path(f'/proc/{child}/stat').read_text().rsplit(')',1)[1].split()[0]=='Z':return
+    except FileNotFoundError:return
+   time.sleep(.05)
+  self.fail('review subprocess descendant survived capture')
+ def test_pipe_holding_child_ignoring_term_is_killed_on_timeout(self):
+  import signal,sys
+  with tempfile.TemporaryDirectory() as temp:
+   pidfile=Path(temp)/'child.pid'
+   child_code=f"import os,signal,time; from pathlib import Path; signal.signal(signal.SIGTERM,signal.SIG_IGN); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(30)"
+   parent_code=f"import subprocess,sys; subprocess.Popen([sys.executable,'-c',{child_code!r}])"
+   try:
+    with self.assertRaisesRegex(m.CaptureError,'subprocess timeout'):m.run([sys.executable,'-c',parent_code],timeout=.5)
+    self.assertTrue(pidfile.exists(),'child fixture did not start')
+    self.assert_descendant_stopped(int(pidfile.read_text()))
+   finally:
+    if pidfile.exists():
+     try:os.kill(int(pidfile.read_text()),signal.SIGKILL)
+     except ProcessLookupError:pass
 
  def test_capture_rechecks_account_and_keeps_email_private(self):
   roots=[]
