@@ -1,0 +1,75 @@
+{
+  "schema": "canary-ci-contract/v1",
+  "repository": {
+    "owner": "KleinPerkins",
+    "name": "kp-pr-bot-canary",
+    "id": 1297059298,
+    "default_branch": "main"
+  },
+  "successor": {
+    "actions_app_id": 15368,
+    "reviewer_app_id": 4217367,
+    "required_check": "ci-required",
+    "workflow": ".github/workflows/ci.yml",
+    "workflow_name": "CI",
+    "activation": "gated"
+  },
+  "shards": {
+    "contract": [
+      "tests/test_canary_contract.py"
+    ],
+    "ci-negative": [
+      "tests/test_ci.py"
+    ],
+    "local-review": [
+      "tests/test_local_review.py",
+      "tests/test_create_review_pr.py"
+    ],
+    "app-gate": [
+      "tests/test_reviewer_app.py"
+    ]
+  },
+  "protected_paths": [
+    ".github",
+    "scripts",
+    "tests",
+    "docs",
+    "AGENTS.md",
+    "README.md",
+    "SECURITY.md",
+    "CODEOWNERS",
+    "_ops"
+  ],
+  "integration_allowlist": [
+    "scripts/local_review.py",
+    "tests/test_local_review.py",
+    "docs/local-review.md",
+    ".github/workflows/reviewer-app.yml",
+    "scripts/reviewer_app.py",
+    "tests/test_reviewer_app.py",
+    "docs/github-delivery.md",
+    ".github/review-enrollments.json",
+    "scripts/create_review_pr.py",
+    "tests/test_create_review_pr.py",
+    "docs/pr-creation.md"
+  ],
+  "legacy": {
+    "mode": "historical-until-control-cutover",
+    "files": [
+      ".github/pr-automation.json",
+      ".github/pr-recipe.json",
+      ".github/pr-automation.lock.json",
+      ".github/pr-verification.json"
+    ],
+    "aggregate": "pr-automation / verify",
+    "custom": "pr-automation / job:repo.kp-pr-bot-canary.m3-verify"
+  },
+  "coverage_mapping": {
+    "regular_inputs": "contract: regular, non-symlink successor policy/workflow/ownership inputs",
+    "identity": "contract: immutable repository 1297059298, main, Actions 15368 and successor reviewer 4217367",
+    "topology": "contract + ci-negative: closed nonempty shards and exact-run fail-closed ci-required aggregate",
+    "ownership": "contract: protected source and policy CODEOWNERS rules",
+    "inertness": "contract + ci-negative: narrow code allowlist and executable/symlink rejection",
+    "operator_docs": "contract: successor design, historical controls and qualification boundaries"
+  }
+}
