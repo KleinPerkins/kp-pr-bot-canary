@@ -128,8 +128,9 @@ def account_read(cli,credential_store='keyring',timeout=30):
   stop(p);selector.close();p.stdin.close();p.stdout.close()
 
 def validate_enrollment(enrollment,account,origin):
- require(set(enrollment)=={'id','origin_account','email','workspace','cli_version','credential_store'},'invalid enrollment fields')
+ require(set(enrollment)=={'id','origin_account','email','workspace','cli_version','credential_store','codex_home'},'invalid enrollment fields')
  require(all(isinstance(v,str) and v.strip() for v in enrollment.values()),'missing enrollment value')
+ require(Path(enrollment['codex_home']).is_absolute() and Path(enrollment['codex_home']).resolve()==Path(os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))).resolve(),'runtime profile differs from enrollment')
  require(enrollment['credential_store'] in ('keyring','file'),'unsupported credential store')
  require(enrollment['origin_account']==origin,'review origin differs from author origin')
  require(account.get('type')=='chatgpt' and account.get('email')==enrollment['email'],'runtime account differs from enrollment')

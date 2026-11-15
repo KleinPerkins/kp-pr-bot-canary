@@ -23,10 +23,15 @@ fields outside the candidate repository:
   "email": "owner@example.invalid",
   "workspace": "owner-declared-workspace",
   "cli_version": "codex-cli 0.148.0",
-  "credential_store": "keyring"
+  "credential_store": "keyring",
+  "codex_home": "/absolute/private/codex-profile"
 }
 ```
 
+`codex_home` is the explicit private absolute configuration profile directory.
+It must equal the effective process `CODEX_HOME` (or the standard default when
+unset); the path is never emitted in the receipt. An isolated personal profile
+may be selected only for that process, without changing the work default.
 `credential_store` is `keyring` or `file`, never credential material. Both
 `account/read` and the review use the same explicit selector. `account/read`
 currently exposes email/type, not a stable account ID or workspace identity.

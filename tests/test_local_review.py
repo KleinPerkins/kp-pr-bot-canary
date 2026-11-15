@@ -13,7 +13,7 @@ m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 class CaptureTests(unittest.TestCase):
  def setUp(self):
-  self.enrollment={'id':'e1','origin_account':'origin1','email':'owner@example.invalid','workspace':'workspace1','cli_version':'codex-cli 0.148.0','credential_store':'keyring'}
+  self.enrollment={'id':'e1','origin_account':'origin1','email':'owner@example.invalid','workspace':'workspace1','cli_version':'codex-cli 0.148.0','credential_store':'keyring','codex_home':str(Path(os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))).resolve())}
   self.account={'type':'chatgpt','email':'owner@example.invalid'}
   self.report={'verdict':'pass','coverage':'complete','summary':'All changed lines inspected.','findings':[],'unresolved_findings':[]}
  def events(self,report=None):
@@ -112,9 +112,11 @@ class GitBindingTests(unittest.TestCase):
   with self.assertRaises(m.CaptureError):m.frozen_input(self.repo,self.request,b'new policy')
   (self.repo/'untracked').write_text('dirty')
   with self.assertRaises(m.CaptureError):m.frozen_input(self.repo,self.request,self.policy)
- def test_runtime_version_drift(self):
-  enrollment={'id':'e1','origin_account':'origin1','email':'owner@example.invalid','workspace':'w1','cli_version':'codex-cli 0.148.0','credential_store':'keyring'}
+ def test_profile_binding_and_runtime_version_drift(self):
+  enrollment={'id':'e1','origin_account':'origin1','email':'owner@example.invalid','workspace':'w1','cli_version':'codex-cli 0.148.0','credential_store':'keyring','codex_home':str(Path(os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))).resolve())}
   account={'type':'chatgpt','email':'owner@example.invalid'}
+  with self.assertRaises(m.CaptureError):m.validate_enrollment({**enrollment,'codex_home':'/wrong/profile'},account,'origin1')
+  with self.assertRaises(m.CaptureError):m.validate_enrollment({**enrollment,'codex_home':'relative/profile'},account,'origin1')
   with patch.object(m,'account_read',return_value=account),patch.object(m,'run',return_value=b'codex-cli 0.149.0'),self.assertRaises(m.CaptureError):m.capture(self.repo,self.request,self.policy,enrollment)
 
 if __name__=='__main__':unittest.main()
