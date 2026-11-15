@@ -1,0 +1,5 @@
+G1 inert negative-admission fixture C.
+
+This disposable PR exercises rejected account and origin evidence.
+Its deliberately invalid test comments remain preserved in history.
+It must be closed without merging after the qualification evidence is captured.
