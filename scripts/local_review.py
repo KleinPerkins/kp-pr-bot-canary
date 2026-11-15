@@ -157,7 +157,7 @@ def frozen_input(repo,request,policy):
  require(merge_base==request['merge_base_sha'],'merge-base mismatch')
  diff=git(repo,'diff','--no-ext-diff','--no-textconv','--no-color','--binary',request['base_sha']+'...'+request['head_sha'],'--')
  require(diff and len(diff)+len(policy)<=MAX_INPUT,'empty or oversized review input')
- require(b'GIT binary patch' not in diff and b'Binary files ' not in diff,'binary change unsupported')
+ require(re.search(rb'^(?:GIT binary patch|Binary files .+ differ)$',diff,re.MULTILINE) is None,'binary change unsupported')
  require(digest(diff)==request['diff_sha256'],'diff digest mismatch')
  require(digest(policy)==request['policy_sha256'],'policy digest mismatch')
  try: diff_text=diff.decode('utf-8'); policy_text=policy.decode('utf-8')
