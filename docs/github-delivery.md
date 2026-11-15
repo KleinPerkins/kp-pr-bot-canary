@@ -107,9 +107,9 @@ downloads strip authorization headers. No artifacts are downloaded or executed.
 Effective main rules must require strict `ci-required@15368`, at least one approval,
 stale-approval dismissal, resolved conversations, squash-only PR merging, linear history, no deletion
 and no non-fast-forward updates. Repository metadata must allow squash/auto-merge and
-disallow merge commits and rebase. All contributing rulesets must be active. Where bypass fields are visible, only the
+disallow merge commits and rebase. All contributing rulesets must be active. Where bypass fields are visible, exactly one
 established `RepositoryRole` actor 5 with `pull_request` bypass is allowlisted
-for merge controls. A distinct ruleset whose declared and effective rules are exactly
+for merge controls; empty or duplicate entries reject. A distinct ruleset whose declared and effective rules are exactly
 `deletion` and `non_fast_forward` preserves actor 5 with `always` bypass for that
 history-only ruleset. This does not permit `always` on merge, CI or review controls.
 Broader or App bypass is rejected. App reads can redact that field: the result
@@ -119,7 +119,11 @@ never exercises that owner authority. Missing API fields,
 inaccessible rules, pagination overflow, unknown mergeability and stale source fail
 closed. The helper rechecks all gates before approval and again before arming.
 
-GitHub's enable-auto-merge mutation has no expected-base compare-and-swap parameter.
+The enable-auto-merge mutation sends the reviewed current head as `expectedHeadOid`
+in its actual `EnablePullRequestAutoMergeInput`; GitHub rejects a head mismatch.
+GraphQL errors or missing squash confirmation reject without retrying or reporting
+`armed`. See [GitHub's input contract](https://docs.github.com/en/graphql/reference/pulls#enablepullrequestautomergeinput).
+The mutation has no expected-base compare-and-swap parameter.
 A base can move after the last read. The final protection therefore depends on live
 native strict required checks and stale-approval behavior. Mocked race tests only
 prove local rejection when a changed snapshot is observed. They do not establish
@@ -184,5 +188,9 @@ introduced.
 `python3 -I -B -m unittest discover -s tests -p test_reviewer_app.py -v` exercises
 receipt drift/failure, origin freezing, sender filtering, pagination, effective
 controls, CI identity/attempt/failure and before/after-approval observed races without
-network or credentials. Integration must also run the successor repository contract
-and both CI shards after the separate source commits are combined.
+network or credentials. The JSON-compatible YAML Reviewer App workflow is parsed
+with the standard library. Structural contracts and adversarial mutations cover
+trusted checkout, token permissions/scope, trigger and write guards, pinned actions,
+read-only dispatch, and the closed set of permitted privileged execution steps.
+Integration must also run the successor repository contract,
+all four CI shards and their aggregate after the separate source commits are combined.
