@@ -1,4 +1,4 @@
-# Protected runnerless automation surface — owner/admin review only.
+# Protected automation and canary source surface. Independent review is a separate gate.
 # BEGIN KleinPerkins/dev pr-automation protected paths (managed; do not hand-edit)
 /.github/** @KleinPerkins
 /.github/CODEOWNERS @KleinPerkins
@@ -13,3 +13,11 @@
 /CODEOWNERS @KleinPerkins
 /_ops/ @KleinPerkins
 # END kleinperkins runnerless PR automation v3
+
+# Successor CI and trusted local-review source ownership
+/scripts/** @KleinPerkins
+/tests/** @KleinPerkins
+/docs/** @KleinPerkins
+/AGENTS.md @KleinPerkins
+/README.md @KleinPerkins
+/SECURITY.md @KleinPerkins
