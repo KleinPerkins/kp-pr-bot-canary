@@ -164,77 +164,88 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
 
 ## Bootstrap and cutover
 
-The one-time G1 bootstrap-completion transaction may also need to repair a verifier
-that cannot finish its own current-main read-only qualification. Such a repair is
-not authority to skip the gate. Prepare the exact reviewed repair, hosted CI and
-prospective read-only credential/control evidence first. The owner/admin request
-must explicitly disclose the failed trusted-main qualification and seek the exact
-sequence adjustment if the same transaction stages qualified enrollment with source
-policy enabled while the repository writer stays OFF and legacy blockers remain.
-Without that specific administrative acceptance, the candidate remains unadmitted.
-After accepted admission, immediately verify new-main CI and rerun trusted-main App
-readiness before enrolled-receipt qualification, control cutover or writer enablement.
-A prospective local probe is not trusted-main qualification. This bounded completion
-of the initial bootstrap is not a recurring bypass or human technical-review lane.
-
 1. Preserve exact source/settings/control preimages and clear actual public exposure.
-   Review the combined CI/App/capture candidate independently under its originating
+   Review the initial CI/App/capture candidate independently under its originating
    account. The initial source bootstrap keeps both write switches off and producers
-   empty. Qualified enrollment is a separate source admission below.
+   empty. Qualified enrollment is a separate source admission.
 2. After the accepted publication gate, enable authorized hosted candidate PR CI
    while retaining legacy blockers. Prove current head/base/merge checkout and
    fail-closed negative canaries on the actual candidate.
-3. If the retired controller still blocks first admission, present the exact reviewed
-   PR/head/base/settings to the human owner/admin under the accepted existing
-   PR-only first-admission route. This script never performs that bypass.
-4. Verify merged-main CI, add the strict 15368/current-review/history/squash controls
-   while retaining legacy blockers, and qualify App 4217367 identity and one-repository
-   token scope. Bootstrap qualification explicitly requires both historical checks
-   from producer 4274739; the post-cutover write path does not require them.
-   Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
-   and changing repository controls are separate root-owned operations.
-5. Before admitting enrolled source, with `REVIEWER_APP_ENABLED` OFF, set the separate qualification variable
-   `REVIEWER_APP_QUALIFY=true` and dispatch **Reviewer App**, mode `app`, on main.
-   No PR number or enrolled receipt is needed. The trusted checkout must equal
-   `github.workflow_sha` and live main. The pinned create-token action requests
-   App4217367 with read-only contents/PR permissions and exactly this repository;
-   the helper receives its token, slug and installation-ID outputs directly. It
-   checks the expected bot `chaos-scheduler-automerge[bot]` (299927791), a live
-   installation credential and exactly one accessible repository. Bot metadata
-   alone is not issuer proof: the fixed App ID input and pinned trusted mint
-   action bind the credential issuer. No public `/apps/{slug}` lookup is required
-   for the private App. The helper's App API client disallows all writes.
-   Qualification verifies current controls through that credential and latest
-   successful current-main push CI, all five job producers, and the aggregate
-   log's exact current revision/run/attempt. Main push receipts use `event=push`,
-   `ref=refs/heads/main`, and empty PR head/base strings. It rechecks main and
-   controls for drift. Legacy blockers stay required during this qualification.
-   Mint and revocation are credential lifecycle operations; no PR, control,
-   enrollment, approval or auto-merge mutation occurs. Mode `receipt` with a PR
-   number retains the separate ordinary CI-token-only receipt snapshot.
-6. After the existing-main read-only App qualification above passes, qualify each
-   actual account/runtime capture, frozen instruction bytes and complete
-   fresh review. Add only its opaque enrolled producer record in independently reviewed
-   source. An empty trusted registry cannot admit its own enrollment PR. Prepare that
-   exact candidate, its account-bound creation record, automatic originating-account
-   review and hosted CI before requesting an exact owner/admin bootstrap-completion
-   admission. That administrative action is separate from the earlier source bootstrap
-   and is not human technical review or an ordinary delivery bypass. The candidate may
-   set policy `enabled=true` while repository `REVIEWER_APP_ENABLED` remains OFF,
-   avoiding another circular policy-activation admission. Retain legacy blockers,
-   verify the admitted main revision and CI, then qualify genuine enrolled receipt
-   acceptance and intended negatives on trusted main before root cutover. A policy
-   edit invalidates previous policy-bound receipts. Never use candidate policy as
-   trusted-main authority or enable writes to bootstrap an unknown producer.
-7. In the accepted exact control transaction, remove retired blockers after proving
-   successor controls and enrolled review admission. The policy was admitted under
-   the separate bootstrap-completion action with writes OFF; enable the repository
-   write flag only at this root gate. New authenticated receipt comments and successful CI workflow completions
-   wake the gate. Ambiguous workflow-run PR bindings fail closed and require diagnosis.
+3. If the retired controller blocks initial source admission, present the exact
+   reviewed PR/head/base/settings to the human owner/admin under the accepted
+   PR-only route. This helper never performs that bypass.
+4. Verify initial merged-main CI. Add strict successor check/review/history/squash
+   controls while retaining both legacy blockers. Install the existing App for this
+   repository and provision its credential with `REVIEWER_APP_ENABLED` OFF. Preserve
+   the accepted per-ruleset owner exceptions. Credential identity/scope probes do
+   not establish full trusted-main readiness; complete that gate in the selected
+   route below. Provisioning and repository controls remain root-owned operations.
+5. Select exactly one first-enrollment route. An empty trusted registry cannot
+   admit its own enrollment PR; neither route grants agent merge/bypass authority.
+
+   **Ordinary route — qualify before enrollment.** Run the read-only App qualification
+   described below on existing main and require success. Qualify each account/runtime,
+   then prepare only its opaque producer record in independently reviewed source.
+   Complete the account-bound PR creation, fresh originating-account review and hosted
+   CI. Request exact owner/admin enrollment admission while the repository writer
+   stays OFF and legacy blockers remain. Verify admitted-main CI and rerun read-only
+   App readiness on that new revision. Proceed to step 6 only after both pass.
+
+   **Repair route — requires explicit one-time owner acceptance.** If existing-main
+   readiness fails because its verifier needs a source repair, prepare the exact
+   repair and qualified enrollment together. Complete independent originating-account
+   review, account-bound PR creation, hosted CI and prospective read-only credential/
+   control probes. The exact owner/admin request must disclose that trusted-main
+   readiness has not passed and explicitly seek this sequence adjustment: admit the
+   combined repair and policy enrollment first, with source policy `enabled=true`
+   but repository writer OFF and both legacy blockers retained. Without that specific
+   acceptance, do not admit the candidate. After accepted admission, immediately
+   verify the new-main CI and run the read-only App qualification below on the newly
+   admitted revision. If either fails, keep the writer OFF and blockers retained;
+   repair the bootstrap without proceeding to step 6. A prospective probe is not
+   trusted-main qualification. This route is bounded to completing the initial G1
+   bootstrap and is not a recurring bypass or human technical-review lane.
+
+6. Both routes join here only after qualified producer source is on main, new-main
+   CI passes, and actual trusted-main App readiness passes. With writer still OFF,
+   qualify genuine enrolled-receipt acceptance and the intended rejection cases
+   against the current raw-main policy. Every policy edit invalidates previous
+   policy-bound receipts. Never use candidate policy or bootstrap-packet review as
+   ordinary trusted-main admission evidence.
+7. Only after these successor gates pass, apply the accepted exact control cutover
+   removing retired blockers. Enable the repository writer only at that root gate;
+   source policy admission alone does not enable writes. New authenticated receipts
+   and successful CI workflow completions wake the gate. Ambiguous workflow-run PR
+   bindings fail closed and require diagnosis.
 8. Prove ordinary exact-head App-only approval/native squash plus stale head/base,
    wrong-origin/sender, failed/incomplete review, missing/failed CI, control drift and
    live base-race negatives. Verify merged revision/default-branch ancestry and all
-   required gates; enabling auto-merge alone is not delivery.
+   required gates; enabled auto-merge alone is not delivery.
+
+### Read-only App qualification used by either route
+
+Keep `REVIEWER_APP_ENABLED` OFF, set `REVIEWER_APP_QUALIFY=true`, and dispatch
+**Reviewer App**, mode `app`, on the main revision specified by the selected route.
+No PR number or enrolled receipt is needed. The trusted checkout must equal
+`github.workflow_sha` and live main. The pinned create-token action requests
+App4217367 with read-only contents/PR permissions and exactly this repository;
+the helper receives token, slug and installation-ID outputs directly. It checks
+bot `chaos-scheduler-automerge[bot]` (299927791), a live installation credential
+and exactly one accessible repository. Bot metadata alone is not issuer proof:
+the fixed App ID and pinned trusted mint action bind the credential issuer.
+No public App lookup is required for this private App. The qualification client
+permits only reads, including the fixed GraphQL query described above.
+
+Qualification verifies effective controls through that credential and latest
+successful current-main push CI: all five job producers and the aggregate log's
+exact current revision/run/attempt. Main push receipts use `event=push`,
+`ref=refs/heads/main`, and empty PR head/base strings. It rechecks main and controls
+for drift. Both historical checks from producer4274739 stay required throughout
+this qualification. Preserve owner-visible bypass preimages separately when the
+App response redacts them. Mint/revocation are credential lifecycle operations;
+no PR, control, enrollment, approval or auto-merge mutation occurs. Verify cleanup
+before continuing. Mode `receipt` with a PR number is the separate ordinary
+CI-token-only receipt snapshot used after both routes join at step 6.
 
 Rollback disables `REVIEWER_APP_ENABLED`, `REVIEWER_APP_QUALIFY` and policy admission, preserving existing
 protections and evidence. Do not weaken checks or use this helper to manually merge.
