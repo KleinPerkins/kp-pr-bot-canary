@@ -1,0 +1,5 @@
+G1 live delivery qualification fixture A.
+
+This inert text change exercises a real work-account review, account-bound PR
+creation, hosted CI, and the existing App's guarded delivery path.
+Its presence records a test input only; it does not assert any gate passed.
