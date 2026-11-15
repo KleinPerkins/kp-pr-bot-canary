@@ -2,8 +2,10 @@
 
 This is source for the accepted G1 successor. It does not report that publication,
 Actions, enrollment, App credentials, controls, or live native merging are qualified.
-The staged App policy is disabled with an empty producer list. Workflow dispatch is
-always read-only. Automated writes additionally require the repository variable
+The staged policy contains separately qualified opaque work and personal producers.
+Its policy admission switch is enabled, but repository `REVIEWER_APP_ENABLED` must
+remain OFF until the root verifies the accepted qualification and cutover gates.
+This source state alone does not authorize writes. Workflow dispatch is always read-only. Automated writes additionally require the repository variable
 `REVIEWER_APP_ENABLED` to equal `true`, enabled trusted enrollment policy, and every
 live gate. Only existing App **4217367** approves a head and arms native **SQUASH**.
 No agent/manual merge command is part of this helper.
@@ -156,7 +158,8 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
 
 1. Preserve exact source/settings/control preimages and clear actual public exposure.
    Review the combined CI/App/capture candidate independently under its originating
-   account. Keep both write switches off and producers empty until qualified.
+   account. The initial source bootstrap keeps both write switches off and producers
+   empty. Qualified enrollment is a separate source admission below.
 2. After the accepted publication gate, enable authorized hosted candidate PR CI
    while retaining legacy blockers. Prove current head/base/merge checkout and
    fail-closed negative canaries on the actual candidate.
@@ -170,8 +173,18 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    Preserve the accepted per-ruleset owner history-only and PR-only exceptions. Provisioning secrets
    and changing repository controls are separate root-owned operations.
 5. Qualify each actual account/runtime capture, frozen instruction bytes and complete
-   fresh review. Add only its opaque enrolled producer record in reviewed trusted
-   source. A policy edit invalidates previous policy-bound receipts.
+   fresh review. Add only its opaque enrolled producer record in independently reviewed
+   source. An empty trusted registry cannot admit its own enrollment PR. Prepare that
+   exact candidate, its account-bound creation record, automatic originating-account
+   review and hosted CI before requesting an exact owner/admin bootstrap-completion
+   admission. That administrative action is separate from the earlier source bootstrap
+   and is not human technical review or an ordinary delivery bypass. The candidate may
+   set policy `enabled=true` while repository `REVIEWER_APP_ENABLED` remains OFF,
+   avoiding another circular policy-activation admission. Retain legacy blockers,
+   verify the admitted main revision and CI, then qualify genuine enrolled receipt
+   acceptance and intended negatives on trusted main before root cutover. A policy
+   edit invalidates previous policy-bound receipts. Never use candidate policy as
+   trusted-main authority or enable writes to bootstrap an unknown producer.
 6. With `REVIEWER_APP_ENABLED` OFF, set the separate qualification variable
    `REVIEWER_APP_QUALIFY=true` and dispatch **Reviewer App**, mode `app`, on main.
    No PR number or enrolled receipt is needed. The trusted checkout must equal
@@ -192,8 +205,9 @@ mandatory root qualification. The helper reports `armed`, never `merged`.
    enrollment, approval or auto-merge mutation occurs. Mode `receipt` with a PR
    number retains the separate ordinary CI-token-only receipt snapshot.
 7. In the accepted exact control transaction, remove retired blockers after proving
-   successor controls. Enable the policy and repository write flag only at the root
-   gate. New authenticated receipt comments and successful CI workflow completions
+   successor controls and enrolled review admission. The policy was admitted under
+   the separate bootstrap-completion action with writes OFF; enable the repository
+   write flag only at this root gate. New authenticated receipt comments and successful CI workflow completions
    wake the gate. Ambiguous workflow-run PR bindings fail closed and require diagnosis.
 8. Prove ordinary exact-head App-only approval/native squash plus stale head/base,
    wrong-origin/sender, failed/incomplete review, missing/failed CI, control drift and

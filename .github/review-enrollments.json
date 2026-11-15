@@ -1,16 +1,46 @@
 {
   "schema": "g1-review-enrollments/v1",
   "repository_id": 1297059298,
-  "enabled": false,
-  "producers": [],
+  "enabled": true,
+  "producers": [
+    {
+      "id": "enrollment-24c0a5f2",
+      "enabled": true,
+      "origin_account": "origin-7612de79",
+      "github_user_id": 49759187,
+      "instructions_sha256": "7efd718dd897e06155b8e49eca37d18b15fb1e47610d9cf4b2d26e294a99e10b",
+      "cli_version": "codex-cli 0.148.0",
+      "credential_store": "keyring",
+      "allowed_startup_notice_sha256": [
+        "b2fc6975a5637afa2ac999a3260fc7980db0be97b0474c7a8a14c57e18d4a6e1",
+        "de8c81bdbcbc27db4d16d6ea11b6463544d5351492a5b397d3d31af1fbc78ca3"
+      ],
+      "creation_adapter_sha256": "eebebfc37f25f6e688cba7c7f6f904ca1c943387500a35a30a232935fb83707a",
+      "capture_adapter_sha256": "8a87b2fb4f01d99cc42d4c19d7c38744682362d0974c94ef3b6443526adab365"
+    },
+    {
+      "id": "enrollment-e876e8eb",
+      "enabled": true,
+      "origin_account": "origin-6a644d43",
+      "github_user_id": 49759187,
+      "instructions_sha256": "7efd718dd897e06155b8e49eca37d18b15fb1e47610d9cf4b2d26e294a99e10b",
+      "cli_version": "codex-cli 0.148.0",
+      "credential_store": "file",
+      "allowed_startup_notice_sha256": [
+        "b2fc6975a5637afa2ac999a3260fc7980db0be97b0474c7a8a14c57e18d4a6e1"
+      ],
+      "creation_adapter_sha256": "eebebfc37f25f6e688cba7c7f6f904ca1c943387500a35a30a232935fb83707a",
+      "capture_adapter_sha256": "8a87b2fb4f01d99cc42d4c19d7c38744682362d0974c94ef3b6443526adab365"
+    }
+  ],
   "governance": {
-    "phase": "G1-bootstrap",
+    "phase": "G1-enrolled-writer-gated",
     "repository": "KleinPerkins/kp-pr-bot-canary",
     "operator_execution_release": "Q15",
     "execution_scope_sha256": "0a420b0172a265d132344cad263490cc9c1d5f32c87c13f2a7374bdb8957ea59",
     "authorized_delivery": "The operator explicitly authorized this repository to become public and adopt sharded standard GitHub-hosted Actions plus the existing Chaos Scheduler App. This supersedes inherited runnerless-only and ShadowSync-only hosting restrictions for this target. The retired PR controller will not resume.",
     "review_authority": "Q16 authorizes an owner-enrolled local adapter with operational trust. One fresh automatic independent review must match the PR-creation account. Capture that account before and after the adapter creates the PR, and preserve a separate creation binding; no review receipt may establish or change origin. No human technical review, cross-account substitution or same-principal anti-forgery claim.",
-    "bootstrap_limits": "App admission remains disabled and producer list empty. Preserve legacy required checks through source bootstrap and read-only App qualification. Only the accepted human owner/admin initial-admission route may bridge the retired checks; agents cannot bypass or manually merge.",
+    "bootstrap_limits": "Qualified producer records and policy admission are staged here. The repository REVIEWER_APP_ENABLED flag must remain OFF through read-only qualification and the accepted successor-control cutover. Legacy required checks stay in place until those gates pass. The previously empty trusted registry cannot admit its own enrollment PR: this source transition requires an exact, independently reviewed owner/admin bootstrap-completion admission; it is not an ordinary delivery lane. Agents cannot bypass or manually merge.",
     "documentation_sequence": "SECURITY.md is a Dev-managed whole-file baseline and remains byte-identical until its owner template is updated within G1. CODEOWNERS is create-only in the general baseline; its marked automation blocks are managed, while surrounding custom ownership rules are repository-owned (_ops/baseline/README.md file-behavior table; profiles/pr-automation/README.md and desired_codeowners). Preserve both existing marked CODEOWNERS blocks byte-identically; reviewed additions outside them are allowed. README and delivery docs describe interim bootstrap; source alone does not complete G1."
   }
 }
