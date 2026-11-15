@@ -77,13 +77,3 @@ public issues, logs, fixtures or review evidence.
 ## Integrated review checks
 
 Four nonempty CI shards run the repository contract, CI failure cases, local-review adapter tests and App-gate tests. `ci-required` verifies all four exact-run receipts and emits a bound aggregate record for the trusted App. Local review uses separate enrolled work and personal Codex profiles. The trusted PR-creation adapter fixes the account of origin when it creates the PR; review receipts cannot select or change it. The App remains disabled until actual source, credential, CI and control qualification; Q16 trusts enrolled local tooling operationally and does not claim protection against same-user receipt forgery.
-
-## Temporary negative qualification input
-
-The following obsolete statement intentionally exercises the existing documentation
-contract. This candidate must fail verification and must not merge. The coordinator
-will remove this section, capture a fresh independent review, and verify recovery.
-
-```text
-GitHub Actions remain paused
-```
