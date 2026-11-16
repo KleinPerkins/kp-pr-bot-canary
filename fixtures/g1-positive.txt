@@ -5,3 +5,5 @@ creation, hosted CI, and the existing App's guarded delivery path.
 Its presence records a test input only; it does not assert any gate passed.
 
 The earlier held experiment remains preserved separately.
+
+Recovery updates this fixture after the paired base advancement.
