@@ -127,7 +127,7 @@ def repository_snapshot(api):
         repo[rest] = value
     return repo
 
-def validate_controls(repo, rules, rulesets, *, require_legacy=False):
+def validate_controls(repo, rules, rulesets, *, require_legacy=False, require_successor_only=False):
     require(repo['id'] == REPOSITORY_ID and repo['full_name'] == REPOSITORY, 'repository mismatch')
     require(repo['default_branch'] == 'main' and not repo.get('archived') and not repo.get('private'), 'repository posture')
     require(repo.get('allow_squash_merge') is True and repo.get('allow_merge_commit') is False
@@ -136,6 +136,12 @@ def validate_controls(repo, rules, rulesets, *, require_legacy=False):
     for rule in rules:
         by_type.setdefault(rule['type'], []).append(rule.get('parameters', {}))
     required = by_type.get('required_status_checks', [])
+    require(not (require_legacy and require_successor_only), 'conflicting qualification stages')
+    if require_successor_only:
+        require(not any(c.get('integration_id') == 4274739
+                        or str(c.get('context', '')).startswith('pr-automation /')
+                        for r in required for c in r.get('required_status_checks', [])),
+                'current qualification rejects retired controller blockers')
     if require_legacy:
         contexts = {(c.get('context'), c.get('integration_id')) for r in required
                     if r.get('strict_required_status_checks_policy') is True
@@ -421,13 +427,14 @@ def snapshot(api, number, policy, policy_hash, now):
     return {'tuple': current, 'origin': origin, 'receipt': receipt, 'ci': ci, 'merge_sha': merge_sha,
             'node_id': pr['node_id'], 'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}, 'controls_sha256': digest(canonical([{k: repo[k] for k in ('id', 'default_branch', 'private', 'allow_squash_merge', 'allow_merge_commit', 'allow_rebase_merge', 'allow_auto_merge')}, rules, rulesets]))}
 
-def controls_snapshot(api, *, require_legacy=False):
+def controls_snapshot(api, *, require_legacy=False, require_successor_only=False):
     prefix = '/repos/' + REPOSITORY
     repo = repository_snapshot(api)
     rules = api.request(prefix + '/rules/branches/main')
     summaries = api.pages(prefix + '/rulesets?includes_parents=true')
     rulesets = [api.request(prefix + '/rulesets/' + str(s['id'])) for s in summaries]
-    validate_controls(repo, rules, rulesets, require_legacy=require_legacy)
+    validate_controls(repo, rules, rulesets, require_legacy=require_legacy,
+                      require_successor_only=require_successor_only)
     return {'controls_sha256': digest(canonical([repo, rules, rulesets])),
             'bypass_visibility': {str(r['id']): ('visible' if 'bypass_actors' in r else 'redacted-or-unavailable') for r in rulesets}}
 
@@ -446,12 +453,14 @@ def validate_app_identity(read_api, app_api, app_slug, installation_id):
     return {'app_id': APP_ID, 'slug': app_slug, 'bot_id': BOT_ID, 'installation_id': installation_id,
             'repository_id': REPOSITORY_ID, 'issuer_proof': 'trusted-pinned-create-token-action'}
 
-def qualify_app(read_api, app_api, trusted, app_slug, installation_id):
+def qualify_app(read_api, app_api, trusted, app_slug, installation_id, *, stage='bootstrap'):
     require(not app_api.writable, 'qualification credential API must be read-only')
+    require(stage in ('bootstrap', 'current'), 'unknown qualification stage')
     prefix = '/repos/' + REPOSITORY
     require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved before qualification')
     identity = validate_app_identity(read_api, app_api, app_slug, installation_id)
-    controls = controls_snapshot(app_api, require_legacy=True)
+    options = {'require_legacy': True} if stage == 'bootstrap' else {'require_successor_only': True}
+    controls = controls_snapshot(app_api, **options)
     workflow = read_api.request(prefix + '/actions/workflows/ci.yml')
     require(workflow['path'] == '.github/workflows/ci.yml' and workflow['state'] == 'active', 'CI workflow identity')
     runs = read_api.pages(prefix + '/actions/workflows/' + str(workflow['id']) + '/runs?event=push&branch=main&head_sha=' + trusted, 'workflow_runs')
@@ -463,9 +472,54 @@ def qualify_app(read_api, app_api, trusted, app_slug, installation_id):
             'main CI not current successful origin')
     validate_ci_jobs(read_api, prefix, None, trusted, run)
     require(read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == trusted, 'main moved during qualification')
-    require(controls_snapshot(app_api, require_legacy=True) == controls, 'controls moved during qualification')
-    return dict(status='qualified-app-read-only', revision=trusted, ci=[run['id'], run['run_attempt']],
+    require(controls_snapshot(app_api, **options) == controls, 'controls moved during qualification')
+    return dict(status='qualified-app-read-only', qualification_stage=stage, revision=trusted, ci=[run['id'], run['run_attempt']],
                 app=identity, mutated=False, **controls)
+
+def mutation_result(result, operation, failure):
+    # Keep diagnostics bounded and free of arbitrary API message/input text.
+    require(isinstance(result, dict), failure)
+    if result.get('errors'):
+        errors = result['errors']
+        kinds = sorted({e['type'] for e in errors if isinstance(e, dict)
+                        and isinstance(e.get('type'), str)
+                        and re.fullmatch(r'[A-Z_]{1,64}', e['type'])}) if isinstance(errors, list) else []
+        raise Rejected(failure + ' (GraphQL error types: ' + ','.join(kinds[:10]) + ')')
+    value = result
+    for field in ('data', operation, 'pullRequest'):
+        require(isinstance(value, dict) and isinstance(value.get(field), dict), failure)
+        value = value[field]
+    return value
+
+
+def confirm_native_merge(read_api, number, proof, response):
+    failure = 'native merge requires read-only reconciliation'
+    commit = response.get('mergeCommit')
+    require(response.get('id') == proof['node_id'] and response.get('merged') is True
+            and isinstance(commit, dict) and isinstance(commit.get('oid'), str)
+            and re.fullmatch(r'[0-9a-f]{40}', commit['oid']), failure)
+    merged_sha = commit['oid']
+    prefix = '/repos/' + REPOSITORY
+    pr = read_api.request(prefix + f'/pulls/{number}')
+    require(pr.get('merged') is True and pr.get('state') == 'closed'
+            and pr.get('node_id') == proof['node_id'] and pr.get('number') == number
+            and pr.get('head', {}).get('sha') == proof['tuple']['head_sha']
+            and pr.get('base', {}).get('ref') == 'main'
+            and pr.get('base', {}).get('repo', {}).get('id') == REPOSITORY_ID
+            and pr.get('merge_commit_sha') == merged_sha
+            and pr.get('merged_by', {}).get('id') == BOT_ID
+            and pr.get('merged_by', {}).get('login') == APP_SLUG + '[bot]', failure)
+    admitted = read_api.request(prefix + '/git/commits/' + merged_sha)
+    tested = read_api.request(prefix + '/git/commits/' + proof['merge_sha'])
+    require([p['sha'] for p in admitted['parents']] == [proof['tuple']['base_sha']]
+            and admitted['tree']['sha'] == tested['tree']['sha'], failure)
+    current_main = read_api.request(prefix + '/git/ref/heads/main')['object']['sha']
+    if current_main != merged_sha:
+        ancestry = read_api.request(prefix + '/compare/' + merged_sha + '...' + current_main)
+        require(ancestry.get('merge_base_commit', {}).get('sha') == merged_sha, failure)
+    return {'status': 'merged', 'head_sha': proof['tuple']['head_sha'], 'merged': True,
+            'merge_sha': merged_sha, 'base_sha': proof['tuple']['base_sha']}
+
 
 def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug, installation_id):
     require(policy.get('enabled') is True, 'App writes disabled by trusted enrollment policy')
@@ -481,16 +535,35 @@ def deliver(read_api, write_api, number, policy, policy_hash, now, app_slug, ins
             and approval['user']['login'] == app_slug + '[bot]' and approval['user']['id'] == BOT_ID
             and approval['user']['type'] == 'Bot', 'approval identity/result mismatch')
     require(snapshot(read_api, number, policy, policy_hash, now) == first, 'admission drift after approval; auto-merge not armed')
-    # GitHub atomically rejects a changed head at this write. There is no
-    # expected-base input: native strict CI still arbitrates subsequent base races.
+    # Select the native operation from a fresh observed state, never from a failed
+    # mutation. Like gh --auto, a ready PR uses native merge; a blocked PR is armed.
+    prefix = '/repos/' + REPOSITORY
+    latest = read_api.request(prefix + f'/pulls/{number}')
+    require(latest.get('node_id') == first['node_id'] and latest.get('state') == 'open'
+            and latest.get('merged') is False and latest.get('draft') is False
+            and latest.get('head', {}).get('sha') == head
+            and latest.get('base', {}).get('sha') == first['tuple']['base_sha']
+            and latest.get('base', {}).get('ref') == 'main'
+            and latest.get('head', {}).get('repo', {}).get('id') == REPOSITORY_ID
+            and latest.get('base', {}).get('repo', {}).get('id') == REPOSITORY_ID
+            and read_api.request(prefix + '/git/ref/heads/main')['object']['sha'] == first['tuple']['base_sha']
+            and latest.get('mergeable') is True
+            and latest.get('mergeable_state') in ('clean', 'blocked'), 'native delivery state drift')
+    # Both native operations atomically check the head, not the base. Native
+    # strict checks still arbitrate subsequent base races; the App has no bypass.
+    inputs = {'pullRequestId': first['node_id'], 'expectedHeadOid': head, 'mergeMethod': 'SQUASH'}
+    if latest['mergeable_state'] == 'clean':
+        result = write_api.request('/graphql', 'POST', {
+            'query': 'mutation($input:MergePullRequestInput!){mergePullRequest(input:$input){pullRequest{id merged mergeCommit{oid}}}}',
+            'variables': {'input': inputs}})
+        response = mutation_result(result, 'mergePullRequest', 'native squash merge not confirmed')
+        return confirm_native_merge(read_api, number, first, response)
     result = write_api.request('/graphql', 'POST', {
         'query': 'mutation($input:EnablePullRequestAutoMergeInput!){enablePullRequestAutoMerge(input:$input){pullRequest{autoMergeRequest{mergeMethod}}}}',
-        'variables': {'input': {'pullRequestId': first['node_id'], 'expectedHeadOid': head, 'mergeMethod': 'SQUASH'}}})
-    require(isinstance(result, dict) and not result.get('errors'), 'native auto-merge not confirmed')
-    confirmation = result
-    for field in ('data', 'enablePullRequestAutoMerge', 'pullRequest', 'autoMergeRequest'):
-        require(isinstance(confirmation, dict) and isinstance(confirmation.get(field), dict), 'native auto-merge not confirmed')
-        confirmation = confirmation[field]
+        'variables': {'input': inputs}})
+    response = mutation_result(result, 'enablePullRequestAutoMerge', 'native auto-merge not confirmed')
+    confirmation = response.get('autoMergeRequest')
+    require(isinstance(confirmation, dict), 'native auto-merge not confirmed')
     require(confirmation.get('mergeMethod') == 'SQUASH', 'native auto-merge not confirmed')
     return {'status': 'armed', 'head_sha': head, 'merged': False}
 
@@ -500,7 +573,9 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--write', action='store_true')
     mode.add_argument('--qualify-app', action='store_true')
+    parser.add_argument('--qualification-stage', choices=('bootstrap', 'current'))
     args = parser.parse_args()
+    require(args.qualify_app or args.qualification_stage is None, 'stage requires read-only App qualification')
     require(args.qualify_app or (args.pr is not None and args.pr > 0), 'invalid PR')
     require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'wrong workflow repository')
     trusted = os.environ.get('TRUSTED_WORKFLOW_SHA', '')
@@ -515,7 +590,8 @@ def main():
     if args.qualify_app:
         require(os.environ.get('REVIEWER_APP_QUALIFY') == 'true', 'App qualification flag disabled')
         require(os.environ.get('REVIEWER_APP_ENABLED') != 'true', 'qualification requires writer flag OFF')
-        result = qualify_app(read, API(os.environ.get('APP_TOKEN')), trusted, os.environ.get('APP_SLUG'), os.environ.get('APP_INSTALLATION_ID'))
+        result = qualify_app(read, API(os.environ.get('APP_TOKEN')), trusted, os.environ.get('APP_SLUG'),
+                             os.environ.get('APP_INSTALLATION_ID'), stage=args.qualification_stage or 'bootstrap')
     elif args.write:
         require(os.environ.get('REVIEWER_APP_ENABLED') == 'true', 'App write flag disabled')
         result = deliver(read, API(os.environ.get('APP_TOKEN'), writable=True), args.pr, policy, digest(policy_bytes), now, os.environ.get('APP_SLUG'), os.environ.get('APP_INSTALLATION_ID'))
